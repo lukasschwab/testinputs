@@ -28,6 +28,16 @@ func TestObserve(t *testing.T) {
 	_, _ = os.ReadFile("after.txt")
 }
 
+func TestEnvironment(t *testing.T) {
+	// These APIs emit their own getenv records. Names are deliberately stable
+	// fixtures, while values must never enter testfs output.
+	_ = os.Getenv("TESTFS_DIRECT_ENVIRONMENT_FIXTURE")
+	_ = os.Getenv("TESTFS_DIRECT_ENVIRONMENT_WITH_SPACES")
+	_ = t.TempDir()
+	_, _ = os.Getwd()
+	t.Setenv("TESTFS_SETENVIRONMENT_FIXTURE", "not-reported")
+}
+
 func TestParallel(t *testing.T) {
 	for _, name := range []string{"a", "b"} {
 		t.Run(name, func(t *testing.T) { t.Parallel(); _, _ = os.ReadFile("parallel.txt") })

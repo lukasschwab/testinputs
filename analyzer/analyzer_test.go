@@ -23,7 +23,7 @@ func TestAnalyzer(t *testing.T) {
 		if !ok {
 			t.Fatal("missing typed result")
 		}
-		if r.SchemaVersion != 1 {
+		if r.SchemaVersion != SchemaVersion {
 			t.Fatal("missing schema version")
 		}
 		for _, f := range r.Findings {
@@ -56,7 +56,7 @@ func TestFilteringAndJSON(t *testing.T) {
 	if err = json.Unmarshal(data, &r); err != nil {
 		t.Fatal(err)
 	}
-	if r.SchemaVersion != 1 || r.Package != "filtered" || len(r.Findings) != 1 || r.Findings[0].Rule != "TFS001" {
+	if r.SchemaVersion != SchemaVersion || r.Package != "filtered" || len(r.Findings) != 1 || r.Findings[0].Rule != "TFS001" {
 		t.Fatalf("%+v", r)
 	}
 }

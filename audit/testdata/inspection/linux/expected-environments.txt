@@ -1,0 +1,6 @@
+# Independently selected from the captured Go 1.27 test log.
+# GODEBUG has both cmd/go implicit and logged evidence.
+implicit GODEBUG
+observed FIXTURE_ENVIRONMENT
+observed environment with spaces
+observed GODEBUG
