@@ -23,7 +23,7 @@ import "testing"
 func TestNothing(*testing.T) {}
 SRC
 : >"$root/fixture with spaces.txt"; : >"$external/outside.txt"
-# Hashing ignores files newer than the test start. Make inputs safely old.
+# Go rejects cache inputs modified within two seconds; make inputs safely old.
 touch -d '2 minutes ago' "$root/fixture with spaces.txt" "$external/outside.txt"
 (
  cd "$root"

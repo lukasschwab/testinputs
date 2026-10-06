@@ -140,6 +140,9 @@ func TestInspectionCLIAndNonMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if code := inspectMain(config{Work: work, PackagesJSON: meta}, nil); code != 1 {
+		t.Fatalf("successful inspection code=%d", code)
+	}
 	if code := inspectMain(config{Work: work, PackagesJSON: meta}, []string{"./..."}); code != ExitAuditFailure {
 		t.Fatalf("package args code=%d", code)
 	}
@@ -212,5 +215,23 @@ func TestInspectionTemporaryUnderRootIsSelected(t *testing.T) {
 	findings, ignored := findingsFromRecords("p", log.Records, func(r Record) bool { return r.CacheRelevant })
 	if len(findings) != 1 || ignored != 0 {
 		t.Fatalf("%+v ignored=%d", findings, ignored)
+	}
+}
+
+func TestInspectionCLIJSONAndCleanAndEmpty(t *testing.T) {
+	work, meta := materializeInspection(t)
+	if err := os.WriteFile(filepath.Join(work, "b001", "testlog.txt"), []byte("# test log\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	jsonFile := filepath.Join(t.TempDir(), "inspection.json")
+	if code := inspectMain(config{Work: work, PackagesJSON: meta, JSON: jsonFile}, nil); code != 0 {
+		t.Fatalf("clean JSON code=%d", code)
+	}
+	if data, err := os.ReadFile(jsonFile); err != nil || !strings.Contains(string(data), `"packages"`) {
+		t.Fatalf("JSON report: %v %s", err, data)
+	}
+	empty := t.TempDir()
+	if code := inspectMain(config{Work: empty, PackagesJSON: meta}, nil); code != ExitAuditFailure {
+		t.Fatalf("empty work code=%d", code)
 	}
 }
