@@ -1,52 +1,44 @@
 # testfs
 
 `testfs` analyzes preserved Go test work directories to identify filesystem and
-environment inputs that can affect test-result caching. It reads supplied
-artifacts and **does not execute commands**.
+environment inputs that can affect test-result caching.
 
-Requires Go 1.27 test-work artifacts. The inspector understands the Go 1.27
-test-log format on Linux, macOS, and Windows. It reports observed cache inputs,
-not cache misses or proof that a test suite is hermetic.
+These checks are especially relevant to CI: the Go cache's hash representation
+of files read by tests includes the file's modification timestamp, which often
+(as in GitHub Actions) reflects when the repository was clined rather than when
+the file was last modified. This kind of read results in test packages running
+every time in CI, even though the cache should be fresh.
 
-## Inspect preserved work
+These issues are commonly resolved with `//go:embed` directives and `testing`
+utilities like `t.TempDir`.
 
-`testfs` is artifact-only: it never invokes `go`, test binaries, or any other
-process. Supply both artifacts from the same checkout:
+## Installation
 
-```sh
-go build -o ./bin/testfs ./cmd/testfs
+```bash
+go install github.com/lukasschwab/testfs/cmd/testfs@latest
+```
+
+## Usage
+
+In your Go module root:
+
+```bash
 go list -json ./... > packages.json
 go test -work ./...
 # Go prints WORK=/path/to/work
-./bin/testfs -work /path/to/work -packages-json packages.json -json -
+testfs -work /path/to/work -packages-json packages.json
 ```
 
-Collect logs without `-count=1`, which disables Go's automatic cache-input logging.
-Use the same package selection and build settings for metadata collection and testing.
+## Findings
 
-Both `-work` and `-packages-json` are required. Metadata must describe the exact
-checkout paths used by the test run, including symlink spelling. `-json -` writes
-one report to stdout; omitting `-json` prints a readable report there. The command
-does not accept package selectors, build flags, or test arguments, and it never
-falls back to `go list`.
-
-The inspector reads package identities from generated `_testmain.go` files and
-reports Go 1.27 test-log cache inputs: filesystem `open`, `stat`, and `chdir`
-events, environment names (never values), and the implicit `GODEBUG` input.
-Findings are package-level observations, not cache misses or per-test attribution.
-It does not calculate hashes or judge cache eligibility.
-
-Exit 1 means a cache-relevant observation was found. Every complete compatible
-action includes the implicit `GODEBUG` input, even if no environment read was
-logged, so a complete inspection normally exits 1. Exit 0 means no findings. Missing actions/logs,
-malformed logs, invalid identities, and invalid metadata are coverage errors and
-exit 2, taking precedence over findings. Cache hits and skipped packages can leave
-no artifacts and cannot prove cache independence. Initialization before `m.Run`,
-child processes, direct syscalls, operation outcomes, and read/write mode are not
-represented by the logs.
-
-Inspection fixtures and their external regeneration procedure live in
-[`audit/testdata/inspection`](audit/testdata/inspection/README.md).
+| Output label | What it represents | Common fix |
+|:---|:-----|:-----|
+| `open "/path/to/file"` | An attempted file open, including failed or write-only opens. In-root file metadata can affect caching. | Embed fixtures; write embedded data to `t.TempDir()` if disk access is required. Keep generated files outside the checkout. |
+| `open "/path/to/directory"` | A directory open; Go hashes its entries’ metadata. The log itself does not distinguish file opens from directory opens. | Avoid scanning checkout directories; use embedded data or explicit inputs. |
+| `stat "/path"` | A file or directory metadata/existence check within Go’s tracked root. | Remove unnecessary checks; use embedded fixtures or test-owned temporary files. |
+| `chdir "/path"` | A working-directory change. Go tracks the path and directory metadata even outside the checkout. | Prefer explicit paths over changing directories. Changing into `t.TempDir()` is not exempt. |
+| `getenv "environment NAME"` | A logged environment read, including reads performed indirectly by library APIs. | Avoid unnecessary ambient reads; inject configuration into the code under test, or keep the variable stable in CI. |
+| `getenv "environment GODEBUG"` with implicit evidence | Go’s implicit cache dependency, even without a logged read. JSON labels it `evidence: "implicit"`; a logged read is reported separately. | Keep `GODEBUG` stable across CI runs; this dependency generally cannot be removed from test code. |
 
 ## Optional static analyzer
 
@@ -55,16 +47,3 @@ not part of the default `testfs` command or runtime inspection dependency graph.
 See its [README](analyzer/README.md) to build the optional vettool, embed
 `testfs/analyzer`, or use the golangci-lint adapter example.
 
-## Validation
-
-```sh
-go test -count=1 ./...
-go test -race -count=1 ./...
-go vet ./...
-```
-
-The shared versioned finding schema is in [`report`](report/schema.go) (schema
-version 2 adds the distinct `environment` finding field; filesystem findings
-continue to use `path` and `class`). Runtime
-implementation references include [Go test logging](https://go.dev/src/testing/internal/testdeps/deps.go)
-and [Go test cache inputs](https://go.dev/src/cmd/go/internal/test/test.go).
