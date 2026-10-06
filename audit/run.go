@@ -299,9 +299,15 @@ func run(c config, args []string) (r Report) {
 }
 
 func aggregate(invocations []Invocation) []Finding {
-	out := []Finding{}
+	// Group before aggregation: a package can have multiple invocations, and
+	// repeated observations across them must contribute to one count.
+	byPackage := map[string][]Record{}
 	for _, inv := range invocations {
-		findings, _ := findingsFromRecords(inv.Package, inv.Log.Records, func(Record) bool { return true })
+		byPackage[inv.Package] = append(byPackage[inv.Package], inv.Log.Records...)
+	}
+	out := []Finding{}
+	for pkg, records := range byPackage {
+		findings, _ := findingsFromRecords(pkg, records, func(Record) bool { return true })
 		out = append(out, findings...)
 	}
 	sort.Slice(out, func(i, j int) bool {

@@ -120,3 +120,14 @@ func TestQuoteExec(t *testing.T) {
 		t.Fatal("misleading terminology")
 	}
 }
+
+func TestAggregateMergesRepeatedPackageInvocations(t *testing.T) {
+	invocations := []Invocation{
+		{Package: "example.test/p", Log: Log{Records: []Record{{Operation: "open", Path: "/fixture", Class: "checkout/module", CacheRelevant: true}}}},
+		{Package: "example.test/p", Log: Log{Records: []Record{{Operation: "open", Path: "/fixture", Class: "checkout/module", CacheRelevant: true}}}},
+	}
+	findings := aggregate(invocations)
+	if len(findings) != 1 || findings[0].Count != 2 {
+		t.Fatalf("aggregate = %+v, want one finding with count 2", findings)
+	}
+}

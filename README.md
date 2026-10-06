@@ -109,7 +109,7 @@ default finding status differ deliberately.
 ### Inspect a preserved `go test -work` directory
 
 `testfs audit -work` inspects an existing work directory; it **never executes
- tests**. Run `go test -work` first (without `-count=1`, which disables Go's
+tests**. Run `go test -work` first (without `-count=1`, which disables Go's
 automatic cache-input logging), then retain the printed `WORK` directory:
 
 ```sh
@@ -119,17 +119,15 @@ go test -work ./...
 
 The inspector reads identities from generated `_testmain.go` and package roots
 from `go list`. Forward the original package-selection build settings with a
-repeatable `-build-flag`, for example `-build-flag=-tags=integration`. To avoid
-running `go list` (including offline or after the checkout moved), supply saved
-metadata instead:
+repeatable `-build-flag`, for example `-build-flag=-tags=integration`. To avoid running `go list` (including offline), supply saved metadata instead:
 
 ```sh
 go list -json ./... > packages.json
 ./bin/testfs audit -work /path/printed/as/WORK -packages-json packages.json -json inspection.json
 ```
 
-Metadata must describe the same checkout paths and symlink spelling used by the
-test. The command reports coverage errors for missing or malformed logs,
+Metadata, preserved logs, checkout paths, and symlink topology must retain the
+same spelling and layout used by the test for filtering to remain faithful. The command reports coverage errors for missing or malformed logs,
 identities, or metadata; status 0 is clean, 1 is observed cache-relevant input,
 and 2 is incomplete inspection. It examines only preserved logs: absent actions
 (cache hits, skipped packages, or disabled logging) are not evidence that tests
