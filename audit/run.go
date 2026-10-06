@@ -66,7 +66,7 @@ type config struct {
 	KeepLogs, FailOnCheckout    bool
 }
 
-// Main implements testfs audit. Test failures retain the go command's status;
+// Main implements testfs audit, collecting package-level runtime dependency observations. Test failures retain the go command's status;
 // collector failures use 2, and opt-in policy findings use 3.
 func Main(args []string) int {
 	var c config
@@ -121,9 +121,13 @@ func Main(args []string) int {
 		fmt.Fprintln(os.Stderr, "testfs audit:", err)
 	}
 	for _, f := range r.Findings {
-		fmt.Fprintf(os.Stderr, "%s: %s observed %s (%s, %d occurrence(s))\n", f.Package, f.Operation, f.Path, f.Class, f.Count)
+		if f.Environment != "" {
+			fmt.Fprintf(os.Stderr, "%s: %s %s environment %s (%d occurrence(s))\n", f.Package, f.Operation, f.Evidence, f.Environment, f.Count)
+		} else {
+			fmt.Fprintf(os.Stderr, "%s: %s observed %s (%s, %d occurrence(s))\n", f.Package, f.Operation, f.Path, f.Class, f.Count)
+		}
 	}
-	fmt.Fprintf(os.Stderr, "testfs audit: %d package execution(s), %d filesystem observation(s), %d collector error(s); this is not a cache-hit measurement\n", len(r.Invocations), len(r.Findings), len(r.Errors))
+	fmt.Fprintf(os.Stderr, "testfs audit: %d package execution(s), %d cache-input observation(s), %d collector error(s); this is not a cache-hit measurement\n", len(r.Invocations), len(r.Findings), len(r.Errors))
 	if r.LogDirectory != "" {
 		fmt.Fprintln(os.Stderr, "testfs audit: logs retained at", r.LogDirectory)
 	}
@@ -325,7 +329,13 @@ func aggregate(invocations []Invocation) []Finding {
 		if a.Operation != b.Operation {
 			return a.Operation < b.Operation
 		}
-		return a.Path < b.Path
+		if a.Path != b.Path {
+			return a.Path < b.Path
+		}
+		if a.Environment != b.Environment {
+			return a.Environment < b.Environment
+		}
+		return a.Evidence < b.Evidence
 	})
 	return out
 }
@@ -340,13 +350,27 @@ func findingsFromRecords(pkg string, records []Record, selectRecord func(Record)
 			ignored++
 			continue
 		}
-		key := r.Operation + "\x00" + r.Path
+		key := r.Operation + "\x00" + r.Path + "\x00" + r.Environment
+		if r.Implicit {
+			key += "\x00implicit"
+		}
 		if i, ok := indices[key]; ok {
 			out[i].Count++
 			continue
 		}
 		indices[key] = len(out)
-		out = append(out, Finding{Package: pkg, Rule: "TFS001", Operation: r.Operation, Evidence: "observed", Confidence: "observed", Reason: "filesystem operation observed; outcome and read/write mode are unavailable", Path: r.Path, Class: r.Class, CacheRelevant: r.CacheRelevant, Count: 1})
+		f := Finding{Package: pkg, Rule: "TFS001", Operation: r.Operation, Evidence: "observed", Confidence: "observed", CacheRelevant: r.CacheRelevant, Count: 1}
+		if r.Environment != "" {
+			f.Environment = r.Environment
+			if r.Implicit {
+				f.Evidence, f.Confidence, f.Reason = "implicit", "implicit", "Go runtime cache input asserted by cmd/go; no test-log environment value is collected"
+			} else {
+				f.Reason = "environment read observed; environment values are unavailable"
+			}
+		} else {
+			f.Reason, f.Path, f.Class = "filesystem operation observed; outcome and read/write mode are unavailable", r.Path, r.Class
+		}
+		out = append(out, f)
 	}
 	return out, ignored
 }

@@ -109,7 +109,7 @@ func TestAuditIntegration(t *testing.T) {
 	seen := map[string]Finding{}
 	for _, f := range r.Findings {
 		seen[filepath.Base(f.Path)] = f
-		if f.Evidence != "observed" || f.Operation == "read" {
+		if (f.Evidence != "observed" && f.Evidence != "implicit") || f.Operation == "read" {
 			t.Fatalf("%+v", f)
 		}
 	}
@@ -120,6 +120,33 @@ func TestAuditIntegration(t *testing.T) {
 	}
 	if _, ok := seen["embedded.txt"]; ok {
 		t.Error("embedded content recorded as runtime disk access")
+	}
+	environments := map[string]Finding{}
+	for _, f := range r.Findings {
+		if f.Environment != "" {
+			environments[f.Environment+"/"+f.Evidence] = f
+			if f.Path != "" || strings.Contains(f.Reason, "not-reported") {
+				t.Fatalf("environment value/path leaked: %+v", f)
+			}
+		}
+	}
+	for _, name := range []string{"TESTFS_DIRECT_ENVIRONMENT_FIXTURE", "TESTFS DIRECT ENVIRONMENT WITH SPACES", "TESTFS_SETENVIRONMENT_FIXTURE", "GOTMPDIR"} {
+		if _, ok := environments[name+"/observed"]; !ok {
+			t.Errorf("missing logged environment %s: %+v", name, environments)
+		}
+	}
+	// os.TempDir is platform-specific: Unix reads TMPDIR; Windows obtains its
+	// TMP/TEMP choice through GetTempPath rather than a logged Go getenv.
+	// os.Getwd similarly reads PWD only on Unix.
+	if r.GOOS != "windows" {
+		for _, name := range []string{"TMPDIR", "PWD"} {
+			if _, ok := environments[name+"/observed"]; !ok {
+				t.Errorf("missing Unix environment %s: %+v", name, environments)
+			}
+		}
+	}
+	if _, ok := environments["GODEBUG/implicit"]; !ok {
+		t.Errorf("missing implicit GODEBUG: %+v", environments)
 	}
 	if seen["fixture space.txt"].Class != "checkout/module" {
 		t.Error("checkout under system temp was hidden")

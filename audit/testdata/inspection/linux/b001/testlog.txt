@@ -1,4 +1,7 @@
 # test log
+getenv FIXTURE_ENVIRONMENT
+getenv environment with spaces
+getenv GODEBUG
 open fixture with spaces.txt
 stat .
 open missing file

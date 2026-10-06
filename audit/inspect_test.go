@@ -120,7 +120,9 @@ func TestInspectWorkEmbeddedFixture(t *testing.T) {
 		}
 		ignored += p.Ignored
 		for _, f := range p.Findings {
-			got[f.Operation+" "+f.Path] = true
+			if f.Environment == "" {
+				got[f.Operation+" "+f.Path] = true
+			}
 		}
 	}
 	if ignored < 3 {
@@ -139,6 +141,27 @@ func TestInspectWorkEmbeddedFixture(t *testing.T) {
 	}
 	if !sameSet(got, want) {
 		t.Fatalf("records=%v want independent Go hash-input capture=%v", got, want)
+	}
+	environmentData, err := inspectionFixtures.ReadFile("testdata/inspection/linux/expected-environments.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotEnvironments := map[string]bool{}
+	for _, p := range r.Packages {
+		for _, f := range p.Findings {
+			if f.Environment != "" {
+				gotEnvironments[f.Evidence+" "+f.Environment] = true
+			}
+		}
+	}
+	wantEnvironments := map[string]bool{}
+	for _, line := range strings.Split(string(environmentData), "\n") {
+		if line != "" && !strings.HasPrefix(line, "#") {
+			wantEnvironments[line] = true
+		}
+	}
+	if !sameSet(gotEnvironments, wantEnvironments) {
+		t.Fatalf("environments=%v want independently captured inputs=%v", gotEnvironments, wantEnvironments)
 	}
 }
 func TestInspectRejectsRelativeChdir(t *testing.T) {
@@ -244,7 +267,7 @@ func TestInspectionLogFilteringContracts(t *testing.T) {
 	outside := t.TempDir()
 	log := ParseLog([]byte("# test log\nopen temporary\nchdir "+outside+"\nopen child\n"), root, "", "")
 	findings, ignored := findingsFromRecords("p", log.Records, func(r Record) bool { return r.CacheRelevant })
-	if len(findings) != 1 || findings[0].Operation != "chdir" || ignored != 2 {
+	if len(findings) != 2 || findings[0].Environment != "GODEBUG" || findings[1].Operation != "chdir" || ignored != 2 {
 		t.Fatalf("%+v ignored=%d", findings, ignored)
 	}
 	if cacheContains(root, root+string(filepath.Separator)+".."+string(filepath.Separator)+"elsewhere") != true {
@@ -259,12 +282,12 @@ func TestInspectionAggregationAndNoRoot(t *testing.T) {
 	root := t.TempDir()
 	log := ParseLog([]byte("# test log\nopen a b\nopen ./a b\nopen a b\n"), root, root, "")
 	findings, ignored := findingsFromRecords("p", log.Records, func(r Record) bool { return r.CacheRelevant })
-	if ignored != 0 || len(findings) != 1 || findings[0].Count != 3 {
+	if ignored != 0 || len(findings) != 2 || findings[0].Environment != "GODEBUG" || findings[1].Count != 3 {
 		t.Fatalf("%+v ignored=%d", findings, ignored)
 	}
 	noRoot := ParseLog([]byte("# test log\nopen temporary\nchdir "+root+"\n"), root, "", "")
 	findings, ignored = findingsFromRecords("p", noRoot.Records, func(r Record) bool { return r.CacheRelevant })
-	if len(findings) != 1 || findings[0].Operation != "chdir" || ignored != 1 {
+	if len(findings) != 2 || findings[0].Environment != "GODEBUG" || findings[1].Operation != "chdir" || ignored != 1 {
 		t.Fatalf("%+v ignored=%d", findings, ignored)
 	}
 }
@@ -274,7 +297,7 @@ func TestInspectionTemporaryUnderRootIsSelected(t *testing.T) {
 	temp := filepath.Join(root, "tmp", "owned")
 	log := ParseLog([]byte("# test log\nopen "+temp+"\n"), root, root, "")
 	findings, ignored := findingsFromRecords("p", log.Records, func(r Record) bool { return r.CacheRelevant })
-	if len(findings) != 1 || ignored != 0 {
+	if len(findings) != 2 || findings[0].Environment != "GODEBUG" || ignored != 0 {
 		t.Fatalf("%+v ignored=%d", findings, ignored)
 	}
 }
@@ -285,7 +308,7 @@ func TestInspectionCLIJSONAndCleanAndEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	jsonFile := filepath.Join(t.TempDir(), "inspection.json")
-	if code := inspectMain(config{Work: work, PackagesJSON: meta, JSON: jsonFile}, nil); code != 0 {
+	if code := inspectMain(config{Work: work, PackagesJSON: meta, JSON: jsonFile}, nil); code != 1 {
 		t.Fatalf("clean JSON code=%d", code)
 	}
 	if data, err := os.ReadFile(jsonFile); err != nil || !strings.Contains(string(data), `"packages"`) {

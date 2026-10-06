@@ -12,13 +12,19 @@ func TestParseLog(t *testing.T) {
 	root := t.TempDir()
 	sub := filepath.Join(root, "sub")
 	log := ParseLog([]byte("# test log\ngetenv SECRET\nopen fixture with spaces\nchdir "+sub+"\nstat ../after\nopen missing\n"), root, root, filepath.Join(root, "separate-temp"))
-	if log.Status != "complete" || len(log.Records) != 4 {
+	if log.Status != "complete" || len(log.Records) != 6 {
 		t.Fatalf("%+v", log)
 	}
-	if r := log.Records[0]; r.RawPath != "fixture with spaces" || r.Sequence != 2 || r.Path != filepath.Join(root, "fixture with spaces") || r.Class != "checkout/module" || !r.CacheRelevant {
+	if r := log.Records[0]; r.Environment != "GODEBUG" || !r.Implicit || r.Sequence != 0 {
+		t.Fatalf("implicit runtime input = %+v", r)
+	}
+	if r := log.Records[1]; r.Environment != "SECRET" || r.Implicit || r.Sequence != 1 {
+		t.Fatalf("logged environment = %+v", r)
+	}
+	if r := log.Records[2]; r.RawPath != "fixture with spaces" || r.Sequence != 2 || r.Path != filepath.Join(root, "fixture with spaces") || r.Class != "checkout/module" || !r.CacheRelevant {
 		t.Fatalf("%+v", r)
 	}
-	if log.Records[2].Path != filepath.Join(root, "after") {
+	if log.Records[4].Path != filepath.Join(root, "after") {
 		t.Fatalf("chdir not applied: %+v", log)
 	}
 }
@@ -38,7 +44,7 @@ func TestSymlinkCacheAndDisplay(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 	log := ParseLog([]byte("# test log\nopen "+link+"\n"), root, root, "")
-	if r := log.Records[0]; !r.CacheRelevant || r.Class != "external" || !r.Ambiguous {
+	if r := log.Records[1]; !r.CacheRelevant || r.Class != "external" || !r.Ambiguous {
 		t.Fatalf("cache filtering must remain distinct from realpath display: %+v", r)
 	}
 }
@@ -64,7 +70,7 @@ func TestClassification(t *testing.T) {
 	temp := filepath.Join(base, "owned")
 	log := ParseLog([]byte("# test log\nopen "+filepath.Join(checkout, "fixture")+"\nopen "+filepath.Join(temp, "data")+"\nopen "+filepath.Join(base, "other")+"\n"), checkout, checkout, temp)
 	want := []string{"checkout/module", "dedicated-temporary", "external/cache-ignored"}
-	for i, r := range log.Records {
+	for i, r := range log.Records[1:] {
 		if r.Class != want[i] {
 			t.Fatalf("%+v", r)
 		}
@@ -121,13 +127,30 @@ func TestQuoteExec(t *testing.T) {
 	}
 }
 
+func TestEnvironmentFindingsPreserveNamesAndDistinguishImplicitGODEBUG(t *testing.T) {
+	log := ParseLog([]byte("# test log\ngetenv GODEBUG\ngetenv name with spaces\n"), t.TempDir(), "", "")
+	findings, _ := findingsFromRecords("p", log.Records, func(Record) bool { return true })
+	if len(findings) != 3 || findings[0].Environment != "GODEBUG" || findings[0].Evidence != "implicit" || findings[0].Confidence != "implicit" || findings[1].Environment != "GODEBUG" || findings[1].Evidence != "observed" || findings[2].Environment != "name with spaces" {
+		t.Fatalf("environment findings = %+v", findings)
+	}
+	for _, f := range findings {
+		if f.Path != "" || f.Class != "" || strings.Contains(f.Reason, "value") && strings.Contains(f.Reason, "=") {
+			t.Fatalf("environment leaked filesystem/value data: %+v", f)
+		}
+	}
+	partial := ParseLog([]byte("# test log\ngetenv NAME"), t.TempDir(), "", "")
+	if len(partial.Records) != 0 {
+		t.Fatalf("incomplete final record retained or implicit GODEBUG added: %+v", partial)
+	}
+}
+
 func TestAggregateMergesRepeatedPackageInvocations(t *testing.T) {
 	invocations := []Invocation{
-		{Package: "example.test/p", Log: Log{Records: []Record{{Operation: "open", Path: "/fixture", Class: "checkout/module", CacheRelevant: true}}}},
-		{Package: "example.test/p", Log: Log{Records: []Record{{Operation: "open", Path: "/fixture", Class: "checkout/module", CacheRelevant: true}}}},
+		{Package: "example.test/p", Log: Log{Records: []Record{{Operation: "open", Path: "/fixture", Class: "checkout/module", CacheRelevant: true}, {Operation: "getenv", Environment: "FIXTURE", CacheRelevant: true}}}},
+		{Package: "example.test/p", Log: Log{Records: []Record{{Operation: "open", Path: "/fixture", Class: "checkout/module", CacheRelevant: true}, {Operation: "getenv", Environment: "FIXTURE", CacheRelevant: true}}}},
 	}
 	findings := aggregate(invocations)
-	if len(findings) != 1 || findings[0].Count != 2 {
-		t.Fatalf("aggregate = %+v, want one finding with count 2", findings)
+	if len(findings) != 2 || findings[0].Environment != "FIXTURE" || findings[0].Count != 2 || findings[1].Path != "/fixture" || findings[1].Count != 2 {
+		t.Fatalf("aggregate = %+v, want repeated filesystem and environment findings", findings)
 	}
 }

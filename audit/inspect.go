@@ -96,8 +96,8 @@ func inspectWork(c config) InspectionReport {
 			"Reports observed package-level cache inputs, not individual test attribution or reproduced cache misses.",
 			"Only preserved logs are inspected; cache hits or skipped packages may leave no logs or actions.",
 			"Metadata is resolved now unless -packages-json is supplied and must describe the original checkout paths.",
-			"Filtering models Go 1.27 computeTestInputsID/search.InDir; it does not compute hashes, check cache eligibility, or inspect environment inputs.",
-			"Open records include failed and write-mode opens. Initialization, pre-m.Run setup, subprocesses, and direct syscalls may be unlogged.",
+			"Filtering models Go 1.27 computeTestInputsID/search.InDir; it does not compute hashes or check cache eligibility. Logged environment names and cmd/go's implicit GODEBUG input are reported without values.",
+			"Open records include failed and write-mode opens. Initialization, pre-m.Run setup, subprocesses, and direct syscalls may be unlogged. Implicit GODEBUG is asserted only for complete compatible logs.",
 		},
 	}
 	work, err := filepath.Abs(c.Work)
@@ -293,7 +293,11 @@ func printInspection(w io.Writer, r InspectionReport) {
 		flagged++
 		fmt.Fprintf(w, "\n%s: observed cache dependencies [%s]\n", p.Package, p.Action)
 		for _, f := range p.Findings {
-			fmt.Fprintf(w, "  %s %q (%d occurrence(s))\n    %s\n", f.Operation, f.Path, f.Count, f.Reason)
+			target := f.Path
+			if f.Environment != "" {
+				target = "environment " + f.Environment
+			}
+			fmt.Fprintf(w, "  %s %q (%d occurrence(s))\n    %s\n", f.Operation, target, f.Count, f.Reason)
 			observations += f.Count
 		}
 	}

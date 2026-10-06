@@ -1,4 +1,4 @@
-// Package audit collects package-level filesystem observations from go test.
+// Package audit collects package-level runtime dependency observations from go test.
 // Its backend uses an explicitly version-gated internal Go test log format.
 package audit
 
@@ -27,10 +27,12 @@ var CoverageLimits = []string{
 type Record struct {
 	Sequence      int    `json:"sequence"`
 	Operation     string `json:"operation"`
-	RawPath       string `json:"raw_path"`
-	Path          string `json:"path"`
+	RawPath       string `json:"raw_path,omitempty"`
+	Path          string `json:"path,omitempty"`
+	Environment   string `json:"environment,omitempty"`
+	Implicit      bool   `json:"implicit,omitempty"`
 	RealPath      string `json:"real_path,omitempty"`
-	Class         string `json:"class"`
+	Class         string `json:"class,omitempty"`
 	CacheRelevant bool   `json:"cache_relevant"`
 	Ambiguous     bool   `json:"ambiguous,omitempty"`
 }
@@ -41,8 +43,8 @@ type Log struct {
 	Records []Record `json:"records"`
 }
 
-// ParseLog retains record order, splits only the first space, and deliberately
-// drops getenv records. No environment values are collected or exposed.
+// ParseLog retains record order and splits only the first space. Environment
+// names are retained exactly as logged; values are never collected or exposed.
 func ParseLog(data []byte, cwd, root, tempBase string) Log {
 	l := Log{Status: "complete", Records: []Record{}}
 	if !bytes.HasPrefix(data, []byte("# test log\n")) {
@@ -69,6 +71,7 @@ func ParseLog(data []byte, cwd, root, tempBase string) Log {
 			continue
 		}
 		if op == "getenv" {
+			l.Records = append(l.Records, Record{Sequence: i + 1, Operation: op, Environment: name, CacheRelevant: true})
 			continue
 		}
 		if op == "chdir" && !filepath.IsAbs(name) {
@@ -124,6 +127,12 @@ func ParseLog(data []byte, cwd, root, tempBase string) Log {
 			cwd = p
 		}
 		l.Records = append(l.Records, r)
+	}
+	// cmd/go always hashes ambient GODEBUG before processing testlog records,
+	// even if the test never logged getenv GODEBUG. It is distinct implicit
+	// evidence, not a value observation. Sequence zero preserves that ordering.
+	if l.Status == "complete" {
+		l.Records = append([]Record{{Sequence: 0, Operation: "getenv", Environment: "GODEBUG", CacheRelevant: true, Implicit: true}}, l.Records...)
 	}
 	return l
 }

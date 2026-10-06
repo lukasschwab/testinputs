@@ -35,18 +35,24 @@ go list -json ./... > packages.json
 Pass original package-selection build settings via repeatable
 `-build-flag`, for example `-build-flag=-tags=integration`. Metadata, preserved
 logs, checkout paths, and symlink layout must retain the spelling and topology
-used by the test. Status 0 is clean, 1 means a cache-relevant input was observed,
-and 2 means inspection was incomplete. `-json -` writes exactly one indented
-inspection JSON document to stdout; report coverage errors remain in that document
-while operational errors are written to stderr.
+used by the test. Status 1 means a cache-relevant input was observed, and 2
+means inspection was incomplete. Because Go always includes ambient `GODEBUG` in
+the cache inputs, every inspection with at least one complete compatible action
+reports that implicit dependency and exits 1; status 0 is therefore possible only
+when no findings are present. `-json -` writes exactly one indented inspection
+JSON document to stdout; report coverage errors remain in that document while
+operational errors are written to stderr.
 
 Absent actions (for example cache hits, skipped packages, or disabled logging) do
 not show that a test is cache-independent. The inspector filters Go 1.27 logged
 opens/stats and `chdir` operations according to Go's lexical-then-symlink
-behavior. It does not calculate hashes, judge cache eligibility, or attribute an
+behavior. It reports every logged environment name (including implicit API reads
+from `TempDir`, `Getwd`, and `Setenv`) without collecting a value or hash. Go's
+ambient `GODEBUG` cache input is also reported as distinct **implicit** evidence
+for each complete compatible action, whether or not it appears in that action's
+log. It does not calculate hashes, judge cache eligibility, or attribute an
 operation to a test. Initialization and pre-`m.Run` setup, subprocess/direct
-syscall I/O, outcomes, and read/write mode are not present in these logs;
-environment records are intentionally ignored.
+syscall I/O, outcomes, and read/write mode are not present in these logs.
 
 Inspection fixtures and their regeneration procedure live in
 [`audit/testdata/inspection`](audit/testdata/inspection/README.md).
@@ -73,7 +79,9 @@ creates a test-owned directory outside selected roots and sets `TMPDIR`, `TMP`,
 and `TEMP`; it is removed after collection. `-keep-logs` retains raw logs and
 invocation metadata.
 
-The internal Go log records `open`, `stat`, and `chdir`. An open is an attempt,
+The internal Go log records `open`, `stat`, `chdir`, and `getenv`. Environment
+findings contain names only—never values or hashes—and include the implicit Go
+runtime `GODEBUG` input. An open is an attempt,
 including failed and write-only opens, so results never claim a confirmed read.
 Missing, malformed, truncated, or interrupted collection is not clean. Active
 fuzzing, benchmarks, compile-only/list-only invocations, and overrides of
@@ -94,6 +102,8 @@ go test -race -count=1 ./...
 go vet ./...
 ```
 
-The shared versioned finding schema is in [`report`](report/schema.go). Runtime
+The shared versioned finding schema is in [`report`](report/schema.go) (schema
+version 2 adds the distinct `environment` finding field; filesystem findings
+continue to use `path` and `class`). Runtime
 implementation references include [Go test logging](https://go.dev/src/testing/internal/testdeps/deps.go)
 and [Go test cache inputs](https://go.dev/src/cmd/go/internal/test/test.go).
