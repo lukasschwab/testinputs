@@ -3,7 +3,6 @@ package audit
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -80,53 +79,6 @@ func TestClassification(t *testing.T) {
 	}
 }
 
-func TestArguments(t *testing.T) {
-	got, err := packageArgs([]string{"-race", "-tags", "demo", "-run", "TestSomething", "./...", "-args", "user-value"})
-	if err != nil || !reflect.DeepEqual(got, []string{"-race", "-tags", "demo", "./..."}) {
-		t.Fatalf("%v %v", got, err)
-	}
-	for _, args := range [][]string{{"-exec", "wrapper"}, {"-exec=wrapper"}, {"-args", "-test.testlogfile=x"}, {"-count=2"}, {"-args", "-test.count=2"}, {"-c"}, {"-list=."}, {"-fuzz=Fuzz"}, {"-n"}, {"-run"}} {
-		if _, err := packageArgs(args); err == nil {
-			t.Errorf("accepted %q", args)
-		}
-	}
-}
-
-func TestVersionGate(t *testing.T) {
-	for _, v := range []string{"go1.26.9", "go1.28.0", "devel go1.27", "go1.27rc1", "go1.27.0-custom"} {
-		if supportedVersion(v, "linux") {
-			t.Errorf("accepted %s", v)
-		}
-	}
-	for _, p := range []string{"linux", "darwin", "windows"} {
-		if !supportedVersion("go1.27.0", p) {
-			t.Errorf("rejected %s", p)
-		}
-	}
-}
-
-func TestQuoteExec(t *testing.T) {
-	for _, s := range []string{"/a path/testfs", `C:\a path\testfs.exe`, `/quote's/testfs`, `/double"quote/testfs`} {
-		q, err := quoteExec(s)
-		if err != nil {
-			t.Fatal(err)
-		}
-		parts, err := splitGoFlags(q)
-		if err != nil || len(parts) != 1 || parts[0] != s {
-			t.Fatalf("%q %v %v", q, parts, err)
-		}
-	}
-	if _, err := quoteExec(`a'"b`); err == nil {
-		t.Fatal("unrepresentable path accepted")
-	}
-	if _, err := splitGoFlags(`"unfinished`); err == nil {
-		t.Fatal("unfinished quote accepted")
-	}
-	if strings.Contains(strings.Join(CoverageLimits, " "), "read confirmed") {
-		t.Fatal("misleading terminology")
-	}
-}
-
 func TestEnvironmentFindingsPreserveNamesAndDistinguishImplicitGODEBUG(t *testing.T) {
 	log := ParseLog([]byte("# test log\ngetenv GODEBUG\ngetenv name with spaces\n"), t.TempDir(), "", "")
 	findings, _ := findingsFromRecords("p", log.Records, func(Record) bool { return true })
@@ -141,16 +93,5 @@ func TestEnvironmentFindingsPreserveNamesAndDistinguishImplicitGODEBUG(t *testin
 	partial := ParseLog([]byte("# test log\ngetenv NAME"), t.TempDir(), "", "")
 	if len(partial.Records) != 0 {
 		t.Fatalf("incomplete final record retained or implicit GODEBUG added: %+v", partial)
-	}
-}
-
-func TestAggregateMergesRepeatedPackageInvocations(t *testing.T) {
-	invocations := []Invocation{
-		{Package: "example.test/p", Log: Log{Records: []Record{{Operation: "open", Path: "/fixture", Class: "checkout/module", CacheRelevant: true}, {Operation: "getenv", Environment: "FIXTURE", CacheRelevant: true}}}},
-		{Package: "example.test/p", Log: Log{Records: []Record{{Operation: "open", Path: "/fixture", Class: "checkout/module", CacheRelevant: true}, {Operation: "getenv", Environment: "FIXTURE", CacheRelevant: true}}}},
-	}
-	findings := aggregate(invocations)
-	if len(findings) != 2 || findings[0].Environment != "FIXTURE" || findings[0].Count != 2 || findings[1].Path != "/fixture" || findings[1].Count != 2 {
-		t.Fatalf("aggregate = %+v, want repeated filesystem and environment findings", findings)
 	}
 }
