@@ -39,7 +39,7 @@ The analyzer identifies test roots, examples, `TestMain`, test-file initializers
 and fuzz seed callbacks, then summarizes reachable type-resolved SSA helpers.
 It models `os`, `io/fs`, `filepath`, templates, `embed.FS`, `fstest.MapFS`, and
 real `testing` temporary-directory methods. Embedded content and proven
- test-owned temporary paths are allowed; mixed or unresolved provenance remains
+test-owned temporary paths are allowed; mixed or unresolved provenance remains
 unsafe or uncertain. It does not report ordinary unreachable production code.
 
 Analysis is bounded to 12 summary passes, 128 operations per function, and

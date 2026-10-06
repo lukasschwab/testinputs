@@ -304,18 +304,27 @@ func captureStdout(t *testing.T, f func() int) (int, []byte) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		os.Stdout = old
+		reader.Close()
+		writer.Close()
+	})
+	var data []byte
+	var readErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		data, readErr = io.ReadAll(reader)
+	}()
 	os.Stdout = writer
 	code := f()
+	os.Stdout = old
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
-	os.Stdout = old
-	data, err := io.ReadAll(reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := reader.Close(); err != nil {
-		t.Fatal(err)
+	<-done
+	if readErr != nil {
+		t.Fatal(readErr)
 	}
 	return code, data
 }

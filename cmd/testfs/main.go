@@ -10,6 +10,9 @@ import (
 func main() { os.Exit(run(os.Args[1:])) }
 
 func run(args []string) int {
+	if len(args) == 0 {
+		return audit.Main([]string{"-h"})
+	}
 	if len(args) > 0 {
 		switch args[0] {
 		case "audit": // Kept as an alias for existing runtime-audit users.

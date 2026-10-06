@@ -71,6 +71,13 @@ type config struct {
 func Main(args []string) int {
 	var c config
 	flags := flag.NewFlagSet("testfs", flag.ContinueOnError)
+	flags.Usage = func() {
+		fmt.Fprintln(flags.Output(), "Usage: testfs -work DIR [inspection options]")
+		fmt.Fprintln(flags.Output(), "       testfs [collection options] -- [go test arguments] packages")
+		fmt.Fprintln(flags.Output(), "Inspect preserved Go test logs without executing tests, or collect a fresh runtime audit.")
+		fmt.Fprintln(flags.Output(), "Static analysis is available separately via testfs-analyzer (see analyzer/README.md).")
+		flags.PrintDefaults()
+	}
 	flags.StringVar(&c.JSON, "json", "", "write the audit report to this JSON file; - writes stdout for -work inspection")
 	flags.StringVar(&c.TempParent, "temp-base", "", "create a dedicated temporary base beneath this external directory")
 	flags.StringVar(&c.Go, "go", "go", "Go command to use")
