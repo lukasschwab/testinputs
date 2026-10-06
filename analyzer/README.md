@@ -1,26 +1,27 @@
-# testfs static analyzer
+# testinputs static analyzer
 
-`testfs/analyzer` is an optional `go/analysis` analyzer for potential runtime
+`github.com/lukasschwab/testinputs/analyzer` is an optional `go/analysis` analyzer for potential runtime
 filesystem dependencies in Go tests. Static findings are possibilities, not
-observed I/O or reproduced cache misses. The primary `testfs` project interface
+observed I/O or reproduced cache misses. The primary `testinputs` project interface
 is runtime preserved-work inspection; see the [root README](../README.md) for
 that workflow.
 
 ## Build and run
 
 ```sh
-go build -o ./bin/testfs-analyzer ./analyzer/cmd/testfs-analyzer
-./bin/testfs-analyzer ./...
-go vet -vettool="$(pwd)/bin/testfs-analyzer" ./...
+go build -o ./bin/testinputs-analyzer ./analyzer/cmd/testinputs-analyzer
+./bin/testinputs-analyzer ./...
+go vet -vettool="$(pwd)/bin/testinputs-analyzer" ./...
 ```
 
 The command supports the standard singlechecker JSON output and Go vettool
-handshake. Its diagnostic analyzer name remains `testfs` for compatibility.
+handshake. Its diagnostic analyzer name is `testinputs`; host linter configurations
+and suppression comments should use that name.
 
 ```sh
-./bin/testfs-analyzer -uncertain=false ./...
-./bin/testfs-analyzer -json ./...
-./bin/testfs-analyzer -report-dir ./testfs-reports ./...
+./bin/testinputs-analyzer -uncertain=false ./...
+./bin/testinputs-analyzer -json ./...
+./bin/testinputs-analyzer -report-dir ./testinputs-reports ./...
 ```
 
 `-report-dir` writes one versioned JSON report per test package, named by an
@@ -52,9 +53,9 @@ non-goals.
 
 ## Embedding and metalinters
 
-Import `testfs/analyzer` and use `analyzer.Analyzer`, or call `analyzer.New()`
+Import `github.com/lukasschwab/testinputs/analyzer` and use `analyzer.Analyzer`, or call `analyzer.New()`
 for an independently configurable instance. A `multichecker` host can use it
-directly. The host, rather than this analyzer, owns `//nolint:testfs` filtering.
+directly. The host, rather than this analyzer, owns `//nolint:testinputs` filtering.
 
 See the [golangci-lint module adapter example](examples/golangci/README.md).
 It keeps host-version dependencies outside this module.

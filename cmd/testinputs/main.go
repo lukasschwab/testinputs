@@ -1,9 +1,9 @@
-// Command testfs inspects supplied Go test work artifacts.
+// Command testinputs inspects supplied Go test work artifacts.
 package main
 
 import (
+	"github.com/lukasschwab/testinputs/audit"
 	"os"
-	"testfs/audit"
 )
 
 func main() { os.Exit(run(os.Args[1:])) }

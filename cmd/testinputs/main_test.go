@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"testfs/audit"
+	"github.com/lukasschwab/testinputs/audit"
 )
 
 func TestNoArgumentsShowsHelp(t *testing.T) {

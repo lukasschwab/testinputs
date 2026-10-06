@@ -44,7 +44,7 @@ func inspectMain(c config) int {
 	r := inspectWork(c)
 	if c.JSON != "" {
 		if err := writeReportJSON(c, r); err != nil {
-			fmt.Fprintln(os.Stderr, "testfs:", err)
+			fmt.Fprintln(os.Stderr, "testinputs:", err)
 			return ExitAuditFailure
 		}
 	} else {

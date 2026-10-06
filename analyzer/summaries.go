@@ -29,7 +29,7 @@ type functionFact struct {
 }
 
 func (*functionFact) AFact()           {}
-func (f *functionFact) String() string { return fmt.Sprintf("testfs/v%d", f.Version) }
+func (f *functionFact) String() string { return fmt.Sprintf("testinputs/v%d", f.Version) }
 
 type evaluator struct {
 	e        *engine

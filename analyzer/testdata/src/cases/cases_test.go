@@ -51,9 +51,9 @@ func TestTemporary(t *testing.T) {
 	read(path)
 	read(joined(dir))
 	read(dir + "/db")
-	dir2, _ := stdos.MkdirTemp("", "testfs-*")
+	dir2, _ := stdos.MkdirTemp("", "testinputs-*")
 	read(filepath.Join(dir2, "db"))
-	f, _ := stdos.CreateTemp(dir, "testfs-*")
+	f, _ := stdos.CreateTemp(dir, "testinputs-*")
 	read(f.Name())
 	read(filepath.Join(stdos.TempDir(), "pre-existing")) // want "TFS001: read os.ReadFile"
 	_, _ = stdos.MkdirTemp("testdata", "new-*")          // want "TFS003: write os.MkdirTemp"
@@ -89,7 +89,7 @@ func TestWrites(t *testing.T) {
 
 func TestHelpers(t *testing.T) {
 	read("fixture") // want "TFS001: read os.ReadFile"
-	//nolint:testfs // Intentional source contract, interpreted by the host only.
+	//nolint:testinputs // Intentional source contract, interpreted by the host only.
 	read("source.go") // want "TFS001: read os.ReadFile"
 	f := func() { read("closure") }
 	f()                                                  // want "TFS001: read os.ReadFile"

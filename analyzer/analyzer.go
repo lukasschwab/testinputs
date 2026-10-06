@@ -13,12 +13,13 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
-	"testfs/report"
 	"unicode"
 	"unicode/utf8"
 
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/ssa"
+
+	"github.com/lukasschwab/testinputs/report"
 )
 
 const SchemaVersion = report.SchemaVersion
@@ -29,7 +30,7 @@ var Analyzer = New()
 
 func New() *analysis.Analyzer {
 	a := &analysis.Analyzer{
-		Name:       "testfs",
+		Name:       "testinputs",
 		Doc:        "report potential runtime filesystem dependencies in tests",
 		FactTypes:  []analysis.Fact{new(functionFact)},
 		ResultType: reflect.TypeOf((*Result)(nil)),

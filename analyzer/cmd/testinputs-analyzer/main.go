@@ -1,4 +1,4 @@
-// Command testfs-analyzer runs the optional testfs static analyzer.
+// Command testinputs-analyzer runs the optional testinputs static analyzer.
 package main
 
 import (
@@ -7,7 +7,7 @@ import (
 	"io"
 	"os"
 
-	"testfs/analyzer"
+	"github.com/lukasschwab/testinputs/analyzer"
 
 	"golang.org/x/tools/go/analysis/singlechecker"
 )
@@ -37,6 +37,6 @@ func version() int {
 		return 1
 	}
 	// x/tools' handshake parser needs a stable name rather than an absolute path.
-	fmt.Printf("testfs version devel buildID=%x\n", h.Sum(nil))
+	fmt.Printf("testinputs version devel buildID=%x\n", h.Sum(nil))
 	return 0
 }

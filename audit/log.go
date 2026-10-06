@@ -8,7 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"testfs/report"
+
+	"github.com/lukasschwab/testinputs/report"
 )
 
 const SchemaVersion = report.SchemaVersion
