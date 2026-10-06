@@ -1,0 +1,2 @@
+# Captured Go log bytes must retain LF on every checkout platform.
+audit/testdata/inspection/** text eol=lf

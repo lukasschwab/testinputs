@@ -58,6 +58,10 @@ func ParseLog(data []byte, cwd, root, tempBase string) Log {
 	// Drop the trailing empty entry or the incomplete final record.
 	lines = lines[:len(lines)-1]
 	for i, line := range lines {
+		// computeTestInputsID ignores blank records.
+		if line == "" {
+			continue
+		}
 		op, name, ok := strings.Cut(line, " ")
 		if !ok || name == "" || (op != "getenv" && op != "open" && op != "stat" && op != "chdir") {
 			l.Status = "malformed"
@@ -67,20 +71,27 @@ func ParseLog(data []byte, cwd, root, tempBase string) Log {
 		if op == "getenv" {
 			continue
 		}
+		if op == "chdir" && !filepath.IsAbs(name) {
+			l.Status = "malformed"
+			l.Problem = fmt.Sprintf("record %d: chdir must be absolute", i+1)
+			continue
+		}
+		// Go cleans relative names through Join, but intentionally retains an
+		// absolute name's lexical spelling for search.InDir.
 		p := name
 		if !filepath.IsAbs(p) {
 			p = filepath.Join(cwd, p)
 		}
-		p = filepath.Clean(p)
+		displayPath := filepath.Clean(p)
 		r := Record{Sequence: i + 1, Operation: op, RawPath: name, Path: p, Class: "external/cache-ignored", CacheRelevant: cacheContains(root, p) || op == "chdir"}
 		r.Ambiguous = filepath.VolumeName(name) != "" && !filepath.IsAbs(name)
 		if r.CacheRelevant {
 			r.Class = "external"
 		}
-		if within(root, p) {
+		if within(root, displayPath) {
 			r.Class = "checkout/module"
 		}
-		if tempBase != "" && within(tempBase, p) {
+		if tempBase != "" && within(tempBase, displayPath) {
 			r.Class = "dedicated-temporary"
 		}
 		if real, err := filepath.EvalSymlinks(p); err == nil {
@@ -110,9 +121,6 @@ func ParseLog(data []byte, cwd, root, tempBase string) Log {
 			}
 		}
 		if op == "chdir" {
-			if !filepath.IsAbs(name) {
-				r.Ambiguous = true
-			}
 			cwd = p
 		}
 		l.Records = append(l.Records, r)
@@ -126,15 +134,29 @@ func cacheContains(root, name string) bool {
 	if root == "" {
 		return false
 	}
-	if within(root, name) {
+	if lexicalContains(name, root) {
 		return true
 	}
-	realName, nameErr := filepath.EvalSymlinks(name)
-	if nameErr == nil && within(root, realName) {
+	realName, err := filepath.EvalSymlinks(name)
+	if err != nil || realName == name {
+		realName = ""
+	} else if lexicalContains(realName, root) {
 		return true
 	}
-	realRoot, rootErr := filepath.EvalSymlinks(root)
-	return rootErr == nil && (within(realRoot, name) || nameErr == nil && within(realRoot, realName))
+	realRoot, err := filepath.EvalSymlinks(root)
+	return err == nil && realRoot != root && (lexicalContains(name, realRoot) || realName != "" && lexicalContains(realName, realRoot))
+}
+
+func lexicalContains(name, root string) bool {
+	nv, rv := filepath.VolumeName(name), filepath.VolumeName(root)
+	if !strings.EqualFold(nv, rv) {
+		return false
+	}
+	name, root = name[len(nv):], root[len(rv):]
+	if name == root || root == "" {
+		return true
+	}
+	return strings.HasPrefix(name, root) && (root[len(root)-1] == filepath.Separator || len(name) > len(root) && name[len(root)] == filepath.Separator)
 }
 
 func readLog(filename, cwd, root, tempBase string) Log {

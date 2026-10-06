@@ -99,62 +99,54 @@ build inputs or Go's behavior when fixture contents change.
 
 ## Runtime audit
 
-To inspect an **existing `go test -work` directory**, use the standalone script
-[scripts/check-test-workdir.go](scripts/check-test-workdir.go). It uses only the
-Go standard library and can be copied to another repository:
+`testfs audit` has two intentional modes: without `-work` it runs an uncached
+collection and reports observations without failing for them; with `-work` it
+only inspects already-preserved Go logs and returns status 1 for cache-relevant
+observations. Both modes return status 2 for incomplete audit coverage. The
+modes share parsing and finding aggregation, but their execution contracts and
+default finding status differ deliberately.
+
+### Inspect a preserved `go test -work` directory
+
+`testfs audit -work` inspects an existing work directory; it **never executes
+tests**. Run `go test -work` first (without `-count=1`, which disables Go's
+automatic cache-input logging), then retain the printed `WORK` directory:
 
 ```sh
-# Run in the repository being checked; note the printed WORK=... directory.
 go test -work ./...
-
-go run /path/to/testfs/scripts/check-test-workdir.go \
-  -work /path/printed/as/WORK -project "$PWD"
+./bin/testfs audit -work /path/printed/as/WORK -project "$PWD"
 ```
 
-This flags **package-level CI cache risks**: fixture/source opens, metadata and
-directory observations beneath Go's package root, and every logged `chdir`.
-A fresh checkout may change their metadata even if contents are identical.
-The report suggests embedding fixtures, writing embedded data to `t.TempDir()`
-when disk input is necessary, and avoiding unnecessary working-directory changes.
-Intentional source-contract tests may reasonably retain the reported dependency.
-
-The script reads package identities from generated `_testmain.go` files and gets
-`Dir` and `Root` from `go list`. It follows Go 1.27's exact filtering order:
-lexical containment first, then symlink fallbacks. External temporary-file opens
-and stats are excluded; temporary files inside the package root are included.
-`chdir` is included even outside that root. The script does not execute tests or
-modify the work directory, and does not infer individual test names from the log.
-
-Pass `-json` for machine-readable output. Use the original project/build settings;
-for example, add `-build-flag=-tags=integration`. For reproducible offline metadata
-resolution, save the original package metadata and provide it explicitly:
+The inspector reads identities from generated `_testmain.go` and package roots
+from `go list`. Forward the original package-selection build settings with a
+repeatable `-build-flag`, for example `-build-flag=-tags=integration`. To avoid running `go list` (including offline), supply saved metadata instead:
 
 ```sh
 go list -json ./... > packages.json
-go run /path/to/testfs/scripts/check-test-workdir.go \
-  -work /path/printed/as/WORK -packages-json packages.json -json
+./bin/testfs audit -work /path/printed/as/WORK -packages-json packages.json -json inspection.json
 ```
 
-Metadata must describe the same checkout paths as the test execution, including
-any symlink spelling. Missing or malformed logs/identities/metadata are coverage
-errors. Cache-hit packages may leave no actions at all, so the report makes claims
-only about the preserved logs. **Do not use `-count=1` to collect these logs**:
-it disables Go's automatic test-cache logging. `testfs audit` below supplies its
-own logger flag when forcing execution.
+Metadata, preserved logs, checkout paths, and symlink topology must retain the
+same spelling and layout used by the test for filtering to remain faithful. The command reports coverage errors for missing or malformed logs,
+identities, or metadata; status 0 is clean, 1 is observed cache-relevant input,
+and 2 is incomplete inspection. It examines only preserved logs: absent actions
+(cache hits, skipped packages, or disabled logging) are not evidence that tests
+are cache-independent. Findings are observations of Go cache inputs, **not
+proven cache misses**. Environment records are intentionally ignored.
 
-For CI, build the script to preserve its exact exit codes (`go run` itself maps
-nonzero program exits to status 1):
+Filtering is pinned to Go 1.27's lexical-then-symlink `search.InDir` behavior.
+It includes in-root opens/stats and every logged `chdir`, including an external
+one, while excluding external opens/stats. It does not calculate hashes, judge
+cache eligibility, or attribute operations to individual tests. Logs also omit
+initialization and pre-`m.Run` setup, subprocess/direct-syscall I/O, outcomes,
+and read/write mode.
 
-```sh
-go build -o ./bin/check-test-workdir ./scripts/check-test-workdir.go
-./bin/check-test-workdir -work /path/printed/as/WORK -project /path/to/repo
-```
-
-Exit 0 means no relevant filesystem operations in the inspected logs; 1 means
-potential cache risks; 2 means incomplete/invalid inspection, taking precedence
-over findings. This checks dependency selection rather than reproducing a cache
-miss or calculating a cache key. It ignores environment records. Tests compare
-its selected paths with Go's actual cache-input hashing output.
+Inspection fixtures embed minimal generated test mains, logs, and package
+metadata; `@ROOT@` placeholders are rebound consistently at test time. Their
+expected selected records are an independent capture of Go's hash-input output.
+To refresh that oracle when updating supported Go versions, run the documented
+developer regeneration procedure in `audit/testdata/inspection/README.md`; normal
+tests invoke neither `go test` nor `go list`.
 
 ### Collect a fresh audit
 

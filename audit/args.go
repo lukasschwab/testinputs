@@ -107,3 +107,13 @@ func splitGoFlags(s string) ([]string, error) {
 	}
 	return out, nil
 }
+
+// repeatedValues accepts a flag more than once without imposing shell-specific
+// splitting rules on values such as -tags=integration.
+type repeatedValues []string
+
+func (v *repeatedValues) String() string { return strings.Join(*v, ", ") }
+func (v *repeatedValues) Set(s string) error {
+	*v = append(*v, s)
+	return nil
+}

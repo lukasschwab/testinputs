@@ -60,8 +60,10 @@ type Report struct {
 }
 
 type config struct {
-	JSON, TempParent, Go     string
-	KeepLogs, FailOnCheckout bool
+	JSON, TempParent, Go        string
+	Work, Project, PackagesJSON string
+	BuildFlags                  repeatedValues
+	KeepLogs, FailOnCheckout    bool
 }
 
 // Main implements testfs audit. Test failures retain the go command's status;
@@ -72,6 +74,10 @@ func Main(args []string) int {
 	flags.StringVar(&c.JSON, "json", "", "write the audit report to this JSON file")
 	flags.StringVar(&c.TempParent, "temp-base", "", "create a dedicated temporary base beneath this external directory")
 	flags.StringVar(&c.Go, "go", "go", "Go command to use")
+	flags.StringVar(&c.Work, "work", "", "inspect this directory preserved by go test -work (does not execute tests)")
+	flags.StringVar(&c.Project, "project", ".", "original project directory for inspection metadata")
+	flags.StringVar(&c.PackagesJSON, "packages-json", "", "saved go list -json metadata for -work inspection")
+	flags.Var(&c.BuildFlags, "build-flag", "go list build flag for -work inspection; repeatable")
 	flags.BoolVar(&c.KeepLogs, "keep-logs", false, "retain raw collector logs and invocation metadata")
 	flags.BoolVar(&c.FailOnCheckout, "fail-on-checkout", false, "exit 3 on observed cache-relevant checkout access")
 	if err := flags.Parse(args); err != nil {
@@ -80,8 +86,15 @@ func Main(args []string) int {
 		}
 		return ExitAuditFailure
 	}
+	if c.Work != "" {
+		return inspectMain(c, flags.Args())
+	}
 	if c.JSON == "-" {
 		fmt.Fprintln(os.Stderr, "testfs audit: -json requires a file; stdout is reserved for go test")
+		return ExitAuditFailure
+	}
+	if c.PackagesJSON != "" || len(c.BuildFlags) != 0 || c.Project != "." {
+		fmt.Fprintln(os.Stderr, "testfs audit: -project, -packages-json, and -build-flag require -work")
 		return ExitAuditFailure
 	}
 	r := run(c, flags.Args())
@@ -286,18 +299,16 @@ func run(c config, args []string) (r Report) {
 }
 
 func aggregate(invocations []Invocation) []Finding {
-	out := []Finding{}
-	indices := map[string]int{}
+	// Group before aggregation: a package can have multiple invocations, and
+	// repeated observations across them must contribute to one count.
+	byPackage := map[string][]Record{}
 	for _, inv := range invocations {
-		for _, r := range inv.Log.Records {
-			key := inv.Package + "\x00" + r.Operation + "\x00" + r.Path
-			if i, ok := indices[key]; ok {
-				out[i].Count++
-				continue
-			}
-			indices[key] = len(out)
-			out = append(out, Finding{Package: inv.Package, Rule: "TFS001", Operation: r.Operation, Evidence: "observed", Confidence: "observed", Reason: "filesystem operation observed; outcome and read/write mode are unavailable", Path: r.Path, Class: r.Class, CacheRelevant: r.CacheRelevant, Count: 1})
-		}
+		byPackage[inv.Package] = append(byPackage[inv.Package], inv.Log.Records...)
+	}
+	out := []Finding{}
+	for pkg, records := range byPackage {
+		findings, _ := findingsFromRecords(pkg, records, func(Record) bool { return true })
+		out = append(out, findings...)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		a, b := out[i], out[j]
@@ -310,6 +321,27 @@ func aggregate(invocations []Invocation) []Finding {
 		return a.Path < b.Path
 	})
 	return out
+}
+
+// findingsFromRecords is shared by fresh collection and preserved-work
+// inspection. selectRecord lets inspection retain Go cache inputs only.
+func findingsFromRecords(pkg string, records []Record, selectRecord func(Record) bool) ([]Finding, int) {
+	out, ignored := []Finding{}, 0
+	indices := map[string]int{}
+	for _, r := range records {
+		if !selectRecord(r) {
+			ignored++
+			continue
+		}
+		key := r.Operation + "\x00" + r.Path
+		if i, ok := indices[key]; ok {
+			out[i].Count++
+			continue
+		}
+		indices[key] = len(out)
+		out = append(out, Finding{Package: pkg, Rule: "TFS001", Operation: r.Operation, Evidence: "observed", Confidence: "observed", Reason: "filesystem operation observed; outcome and read/write mode are unavailable", Path: r.Path, Class: r.Class, CacheRelevant: r.CacheRelevant, Count: 1})
+	}
+	return out, ignored
 }
 
 func supportedVersion(version, platform string) bool {
