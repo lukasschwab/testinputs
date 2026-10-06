@@ -1,4 +1,4 @@
-package testfs
+package analyzer
 
 import (
 	"go/constant"

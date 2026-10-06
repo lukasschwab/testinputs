@@ -1,5 +1,5 @@
-// Package testfs identifies potential runtime filesystem dependencies in Go tests.
-package testfs
+// Package analyzer identifies potential runtime filesystem dependencies in Go tests.
+package analyzer
 
 import (
 	"crypto/sha256"

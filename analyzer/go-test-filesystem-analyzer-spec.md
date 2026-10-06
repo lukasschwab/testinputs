@@ -40,7 +40,7 @@ The tool must distinguish these cases:
 
 ## Deliverables and scope
 
-Publish a standalone Go module containing an exported analyzer, a command-line driver, and the runtime collector. The analyzer name is `testfs`. Keep the reusable analysis package independent of a specific metalinter version.
+Publish an optional `testfs/analyzer` package and contained command-line driver. The analyzer name is `testfs`. Keep the reusable analysis package independent of a specific metalinter version. Runtime collection and preserved-work inspection are documented at the repository root.
 
 Provide a `singlechecker` executable usable directly or through `go vet -vettool`. Document integration into a metalinter using its supported analyzer/plugin mechanism. Host linters own `//nolint:testfs` processing; the analyzer must not silently interpret that comment differently. A standalone runner may offer explicit diagnostic filtering, but must document its own syntax.
 

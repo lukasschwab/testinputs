@@ -296,3 +296,65 @@ func TestInspectionCLIJSONAndCleanAndEmpty(t *testing.T) {
 		t.Fatalf("empty work code=%d", code)
 	}
 }
+
+func captureStdout(t *testing.T, f func() int) (int, []byte) {
+	t.Helper()
+	old := os.Stdout
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		os.Stdout = old
+		reader.Close()
+		writer.Close()
+	})
+	var data []byte
+	var readErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		data, readErr = io.ReadAll(reader)
+	}()
+	os.Stdout = writer
+	code := f()
+	os.Stdout = old
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	return code, data
+}
+
+func TestInspectionCLIJSONStdoutIncludesReportErrors(t *testing.T) {
+	work, meta := materializeInspection(t)
+	code, data := captureStdout(t, func() int {
+		return inspectMain(config{Work: work, PackagesJSON: meta, JSON: "-"}, nil)
+	})
+	if code != 1 {
+		t.Fatalf("finding inspection code=%d", code)
+	}
+	var report InspectionReport
+	if err := json.Unmarshal(data, &report); err != nil {
+		t.Fatalf("stdout is not one JSON document: %v\n%s", err, data)
+	}
+	if len(report.Packages) == 0 || len(report.Errors) != 0 {
+		t.Fatalf("report=%+v", report)
+	}
+
+	code, data = captureStdout(t, func() int {
+		return inspectMain(config{Work: t.TempDir(), PackagesJSON: meta, JSON: "-"}, nil)
+	})
+	if code != ExitAuditFailure {
+		t.Fatalf("incomplete inspection code=%d", code)
+	}
+	if err := json.Unmarshal(data, &report); err != nil {
+		t.Fatalf("error report is not JSON: %v\n%s", err, data)
+	}
+	if len(report.Errors) == 0 {
+		t.Fatalf("report errors omitted from JSON: %+v", report)
+	}
+}

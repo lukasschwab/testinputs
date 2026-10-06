@@ -11,7 +11,7 @@ versions according to the consuming repository.
 package testfsplugin
 
 import (
-    "testfs"
+    "testfs/analyzer"
 
     "github.com/golangci/plugin-module-register/register"
     "golang.org/x/tools/go/analysis"
@@ -26,7 +26,7 @@ func init() {
 type plugin struct{}
 
 func (plugin) BuildAnalyzers() ([]*analysis.Analyzer, error) {
-    return []*analysis.Analyzer{testfs.New()}, nil
+    return []*analysis.Analyzer{analyzer.New()}, nil
 }
 
 func (plugin) GetLoadMode() string {

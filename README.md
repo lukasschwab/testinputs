@@ -1,253 +1,99 @@
 # testfs
 
-`testfs` finds potential runtime filesystem dependencies in Go tests. It includes
-a standard `go/analysis` analyzer, a `singlechecker` executable usable as a vettool,
-and an independent runtime audit exposed as `testfs audit`.
+`testfs` analyzes preserved Go test work directories to identify runtime filesystem
+inputs that can make test-result caching sensitive to a checkout. Its primary mode
+is inspection: it reads Go's saved test logs and **does not execute tests**.
 
-Requires Go 1.27. The runtime adapter accepts released Go 1.27.x toolchains on
-Linux, macOS, and Windows; other versions fail explicitly. Local validation was
-performed on macOS/arm64 with Go 1.27.0. The CI matrix exercises all three operating
-systems; cross-compilation alone does not establish runtime compatibility.
+Requires Go 1.27. Runtime inspection supports released Go 1.27.x toolchains on
+Linux, macOS, and Windows. It reports observed cache inputs, not cache misses or
+proof that a test suite is hermetic.
 
-## Build and run
+## Inspect preserved work (primary workflow)
+
+Build the runtime tool, preserve a work directory while running the tests, then
+inspect that directory. Do **not** add `-count=1`: doing so disables Go's normal
+cache-input logging.
 
 ```sh
 go build -o ./bin/testfs ./cmd/testfs
-./bin/testfs ./...
-go vet -vettool="$(pwd)/bin/testfs" ./...
-```
-
-Run either static command from the repository being analyzed, using the absolute
-path to the built executable when it lives elsewhere. Test variants, including
-external test packages, are handled by the standard Go analysis driver. Findings
-make the static command exit unsuccessfully. No source files are changed.
-
-```sh
-# Omit uncertain TFS002 diagnostics (writes still have their own rule).
-./bin/testfs -uncertain=false ./...
-
-# Standard go/analysis JSON diagnostic envelope.
-./bin/testfs -json ./...
-
-# Versioned testfs evidence, one JSON file per test package.
-./bin/testfs -report-dir ./testfs-reports ./...
-```
-
-The report filenames hash the package import path. Each report includes the
-package name, schema version, findings, unresolved-call count, and limitations.
-Use a fresh output directory per run: old package reports are not deleted.
-`-json` remains the standard driver format; `-report-dir` uses the shared
-[`report.Finding`](report/schema.go) schema also used by the audit.
-
-## Static rules and analysis
-
-| Rule | Meaning |
-| --- | --- |
-| TFS001 | Potential access to disk-backed filesystem data or metadata |
-| TFS002 | Filesystem backing store/path safety is unresolved, or analysis exceeded its budget |
-| TFS003 | Write, creation, mutation, or write-mode open that may add a dependency |
-
-Diagnostics include operation and confidence. They identify potential
-dependencies, not actual I/O or a demonstrated cache miss. A write is never
-described as a read. Unknown `OpenFile` flags are conservatively treated as a
-potential write. No automatic fixes or name-based suppressions are provided.
-
-Roots are ordinary tests, examples, `TestMain`, test-file initializers, and fuzz
-seed callbacks. Benchmarks are outside this initial scope. Reachable helpers are
-summarized using type-resolved SSA operations. Production functions that are not
-reachable from test roots do not produce test diagnostics.
-
-The analyzer tracks provenance sets through interfaces, tuples, local calls,
-closures, fields, and control-flow merges. A mixed disk/temporary origin stays
-unsafe. Parameterized summaries and versioned `analysis.Fact` values preserve
-argument-to-operation and argument-to-return relationships across package
-boundaries. Findings are placed at the test call site, with a related helper
-location when that source is part of the same analysis pass.
-
-Model version 1 covers:
-
-- `os` reads, opens, metadata, directory access, writes, temporary constructors,
-  `DirFS`, and the modeled `os.Root` operations in [models.go](models.go).
-- `io/fs` reads, directory operations, `Open`, and `Sub`.
-- `filepath` glob/traversal and path joins; template `ParseFiles`, `ParseGlob`,
-  and `ParseFS` functions and methods.
-- `embed.FS`, `fstest.MapFS`, actual `testing` temporary-directory methods,
-  `testing` callbacks, and filesystem wrappers with available `Open` summaries.
-
-An unused `os.DirFS` constructor is not a finding. Reading embedded content and
-writing it beneath a test-owned temporary root is allowed. Copying from a disk
-fixture still reports the original read. `os.TempDir()` by itself does not prove
-ownership of an existing file. Temporary joins must have constant, contained
-components; escapes and unproven dynamic components lose safety. Known symlink
-and rename/link mutations conservatively invalidate temporary safety in the
-containing test summary.
-
-Analysis is bounded to 12 summary passes, 128 operations per function, and
-provenance trees of depth 12 / 128 nodes. Exceeding these bounds retains uncertainty
-and reports incomplete coverage. This is not whole-program pointer analysis:
-reflection, unsafe, arbitrary heap aliases, function-valued parameters, unresolved
-interface dispatch, and arbitrary callbacks passed into libraries can be missed.
-Address-taken local stores are merged conservatively, so a later mutation can
-also qualify an earlier captured use. Unknown library calls are counted as
-coverage limitations, not invented filesystem sinks. The unresolved-call count
-counts direct sites and helper-summary boundaries, not unique whole-program calls.
-
-Temporary paths are an intended testing pattern, not a security boundary or an
-unconditional caching guarantee. An unusual `TMPDIR` inside the module, symlinks,
-and unmodeled mutations can still affect caching. The analyzer does not alter
-build inputs or Go's behavior when fixture contents change.
-
-## Runtime audit
-
-`testfs audit` has two intentional modes: without `-work` it runs an uncached
-collection and reports observations without failing for them; with `-work` it
-only inspects already-preserved Go logs and returns status 1 for cache-relevant
-observations. Both modes return status 2 for incomplete audit coverage. The
-modes share parsing and finding aggregation, but their execution contracts and
-default finding status differ deliberately.
-
-### Inspect a preserved `go test -work` directory
-
-`testfs audit -work` inspects an existing work directory; it **never executes
-tests**. Run `go test -work` first (without `-count=1`, which disables Go's
-automatic cache-input logging), then retain the printed `WORK` directory:
-
-```sh
 go test -work ./...
-./bin/testfs audit -work /path/printed/as/WORK -project "$PWD"
+# Go prints WORK=/path/to/work
+./bin/testfs -work /path/to/work -project "$PWD"
+# Stream exactly one indented inspection report to stdout.
+./bin/testfs -work /path/to/work -project "$PWD" -json -
 ```
 
-The inspector reads identities from generated `_testmain.go` and package roots
-from `go list`. Forward the original package-selection build settings with a
-repeatable `-build-flag`, for example `-build-flag=-tags=integration`. To avoid running `go list` (including offline), supply saved metadata instead:
+`-work` never runs tests. It reads identities from generated `_testmain.go` files
+and package roots from `go list`. Save package metadata when inspection must work
+offline or later:
 
 ```sh
 go list -json ./... > packages.json
-./bin/testfs audit -work /path/printed/as/WORK -packages-json packages.json -json inspection.json
+./bin/testfs -work /path/to/work -packages-json packages.json -json inspection.json
 ```
 
-Metadata, preserved logs, checkout paths, and symlink topology must retain the
-same spelling and layout used by the test for filtering to remain faithful. The command reports coverage errors for missing or malformed logs,
-identities, or metadata; status 0 is clean, 1 is observed cache-relevant input,
-and 2 is incomplete inspection. It examines only preserved logs: absent actions
-(cache hits, skipped packages, or disabled logging) are not evidence that tests
-are cache-independent. Findings are observations of Go cache inputs, **not
-proven cache misses**. Environment records are intentionally ignored.
+Pass original package-selection build settings via repeatable
+`-build-flag`, for example `-build-flag=-tags=integration`. Metadata, preserved
+logs, checkout paths, and symlink layout must retain the spelling and topology
+used by the test. Status 0 is clean, 1 means a cache-relevant input was observed,
+and 2 means inspection was incomplete. `-json -` writes exactly one indented
+inspection JSON document to stdout; report coverage errors remain in that document
+while operational errors are written to stderr.
 
-Filtering is pinned to Go 1.27's lexical-then-symlink `search.InDir` behavior.
-It includes in-root opens/stats and every logged `chdir`, including an external
-one, while excluding external opens/stats. It does not calculate hashes, judge
-cache eligibility, or attribute operations to individual tests. Logs also omit
-initialization and pre-`m.Run` setup, subprocess/direct-syscall I/O, outcomes,
-and read/write mode.
+Absent actions (for example cache hits, skipped packages, or disabled logging) do
+not show that a test is cache-independent. The inspector filters Go 1.27 logged
+opens/stats and `chdir` operations according to Go's lexical-then-symlink
+behavior. It does not calculate hashes, judge cache eligibility, or attribute an
+operation to a test. Initialization and pre-`m.Run` setup, subprocess/direct
+syscall I/O, outcomes, and read/write mode are not present in these logs;
+environment records are intentionally ignored.
 
-Inspection fixtures embed minimal generated test mains, logs, and package
-metadata; `@ROOT@` placeholders are rebound consistently at test time. Their
-expected selected records are an independent capture of Go's hash-input output.
-To refresh that oracle when updating supported Go versions, run the documented
-developer regeneration procedure in `audit/testdata/inspection/README.md`; normal
-tests invoke neither `go test` nor `go list`.
+Inspection fixtures and their regeneration procedure live in
+[`audit/testdata/inspection`](audit/testdata/inspection/README.md).
 
-### Collect a fresh audit
+## Collect a fresh runtime audit
+
+A collection run is available when no preserved work directory exists. It runs
+selected tests with `-count=1`, so it measures observed access rather than cache
+hits. The historic `testfs audit` spelling remains an alias. During fresh collection,
+stdout remains reserved for child test output, so `-json -` is intentionally
+available only with `-work`.
 
 ```sh
-./bin/testfs audit ./...
-./bin/testfs audit -json audit.json -- -race -run TestAttachment ./...
-./bin/testfs audit -temp-base /an/existing/external/directory -- ./...
+./bin/testfs ./...
+./bin/testfs -json audit.json -- -race -run TestAttachment ./...
+./bin/testfs -temp-base /an/existing/external/directory -- ./...
 ./bin/testfs audit -fail-on-checkout -keep-logs -- ./...
 ```
 
-Audit options precede `--`; arguments after it are forwarded to `go test`.
-`-go /path/to/go` selects the Go command. Toolchain selection still follows Go's
-normal configuration. Package metadata comes from `go list` with the same build
-settings. Each test binary runs through `go test -exec` with its own action log,
-initial working directory, argument list, and completion metadata. Package names
-come from directory metadata, never from temporary binary filenames.
+Options precede `--`; arguments after it go to `go test`. Collection preserves
+test output and its nonzero status, while collector failures return 2 and
+`-fail-on-checkout` returns 3 after otherwise successful tests. `-temp-base`
+creates a test-owned directory outside selected roots and sets `TMPDIR`, `TMP`,
+and `TEMP`; it is removed after collection. `-keep-logs` retains raw logs and
+invocation metadata.
 
-The audit forces `-count=1` so every selected test binary executes. This measures
-observed access, not cache hits. It preserves test output and Go's test exit status.
-Unix interrupts and termination signals are forwarded to the child. Windows
-interrupts terminate the child because Go cannot forward `os.Interrupt` there.
-Logs aggregate by package, operation, and normalized path; raw paths and event
-sequence remain available in JSON. A relative path follows logged `chdir` events.
-`getenv` records are discarded; no environment values are included in reports.
+The internal Go log records `open`, `stat`, and `chdir`. An open is an attempt,
+including failed and write-only opens, so results never claim a confirmed read.
+Missing, malformed, truncated, or interrupted collection is not clean. Active
+fuzzing, benchmarks, compile-only/list-only invocations, and overrides of
+`-exec`, `-test.testlogfile`, or `-count` are rejected.
 
-The internal `-test.testlogfile` format records `open`, `stat`, and `chdir`.
-An open is an **attempt**, including failed and write-only opens. Its result and
-read/write mode are absent. Runtime findings therefore use TFS001, evidence
-`observed`, and operation names such as `open`; they never claim a confirmed read.
-There is no test name, source position, stack, or goroutine attribution. Parallel
-tests contribute to a package-level log.
+## Optional static analyzer
 
-Classification distinguishes checkout/module, external, external/cache-ignored,
-and dedicated-temporary observations. Cache-root containment follows the Go 1.27
-lexical check and symlink fallbacks, separately from realpath-based display.
-Logged `chdir` remains cache-relevant even outside the package root. A checkout
-under the system temporary directory remains visible.
+The source analyzer is intentionally contained in [`analyzer`](analyzer/). It is
+not part of the default `testfs` command or runtime inspection dependency graph.
+See its [README](analyzer/README.md) to build the optional vettool, embed
+`testfs/analyzer`, or use the golangci-lint adapter example.
 
-By default the existing temporary environment is preserved. `-temp-base` explicitly
-creates a fresh owned subdirectory outside selected module roots and sets `TMPDIR`,
-`TMP`, and `TEMP` for test processes. The report records this change. The owned
-directory is removed after collection. Realpath classification is best effort:
-test cleanup may already have deleted files, and symlink or concurrent directory
-changes may remain ambiguous.
-
-`-exec`, `-test.testlogfile`, and `-count` overrides are rejected, including in
-`GOFLAGS`. Compile-only/list-only invocations, active fuzzing, and benchmark runs
-are rejected. Pass custom test flags after `-args`. Paths with spaces are covered
-by integration tests, including the executable itself.
-
-| Audit status | Meaning |
-| --- | --- |
-| 0 | Tests passed and collection completed; observations alone are not failures |
-| Go test's nonzero status | Test/build failure takes precedence |
-| 2 | Collector, metadata, unsupported-toolchain, missing-log, or report error |
-| 3 | Tests and collection passed, but `-fail-on-checkout` found relevant checkout access |
-
-Raw logs and invocation metadata are temporary unless `-keep-logs` is selected.
-Missing, malformed, truncated, or interrupted collection never yields a clean
-audit. An abnormal test-process exit qualifies even a syntactically complete log.
-
-The audit publishes these blind spots in every JSON report: initialization and
-`TestMain` setup before `m.Run`; child-process, syscall, and C-library operations
-that bypass the Go hooks; omitted empty/newline-containing names; buffered records
-lost on crashes; and absent per-test attribution. A valid log cannot establish
-complete coverage. No monkey-patching, Go source modification, internal-package
-imports, or cache-layout scraping is used.
-
-## Embedding and metalinters
-
-Import `testfs.Analyzer`, or call `testfs.New()` for independently configurable
-flags. The package has no dependency on a particular metalinter. A standard
-`multichecker.Main(testfs.Analyzer, ...)` host works directly.
-
-See the [golangci-lint adapter example](examples/golangci/README.md) for its
-supported module-plugin mechanism. The host owns `//nolint:testfs` filtering;
-standalone `testfs` deliberately reports the raw finding, including intentional
-source-contract checks. Put an explained host suppression at the test call site.
-
-## Validation and performance
+## Validation
 
 ```sh
 go test -count=1 ./...
 go test -race -count=1 ./...
 go vet ./...
-go test -run '^$' -bench BenchmarkAnalyzer -benchmem .
 ```
 
-Use `-count=1` when editing analysistest fixtures: package loading in subprocesses
-is not necessarily represented in Go's test-cache inputs. Fixtures cover safe and
-unsafe provenance, aliases, wrappers, helpers/facts, recursion, roots, suppression
-ownership, JSON, and read/write distinctions. Disposable-module integration tests
-exercise the real vettool and audit, parallel execution, temporary classification,
-spaces, failed opens, missing/partial logs, failures, timeouts, and blind spots.
-
-The benchmark generates modules with 10 and 1,000 helper/test pairs, excluding
-package loading from timed analysis. Initial measurements and limits are recorded
-in [PERFORMANCE.md](PERFORMANCE.md). They are a baseline, not a claim of complete
-analysis or a production-scale performance guarantee.
-
-Implementation references: [Go analysis](https://pkg.go.dev/golang.org/x/tools/go/analysis),
-[SSA](https://pkg.go.dev/golang.org/x/tools/go/ssa),
-[Go test logging](https://go.dev/src/testing/internal/testdeps/deps.go), and
-[Go test cache inputs](https://go.dev/src/cmd/go/internal/test/test.go).
+The shared versioned finding schema is in [`report`](report/schema.go). Runtime
+implementation references include [Go test logging](https://go.dev/src/testing/internal/testdeps/deps.go)
+and [Go test cache inputs](https://go.dev/src/cmd/go/internal/test/test.go).

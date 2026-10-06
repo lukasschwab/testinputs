@@ -51,15 +51,16 @@ func inspectMain(c config, args []string) int {
 		fmt.Fprintln(os.Stderr, "testfs audit: -temp-base, -keep-logs, and -fail-on-checkout are unavailable with -work")
 		return ExitAuditFailure
 	}
-	if c.JSON == "-" {
-		fmt.Fprintln(os.Stderr, "testfs audit: -json requires a file; stdout is reserved for the inspection report")
-		return ExitAuditFailure
-	}
 	r := inspectWork(c)
 	if c.JSON != "" {
 		b, err := json.MarshalIndent(r, "", "  ")
 		if err == nil {
-			err = os.WriteFile(c.JSON, append(b, '\n'), 0600)
+			b = append(b, '\n')
+			if c.JSON == "-" {
+				_, err = os.Stdout.Write(b)
+			} else {
+				err = os.WriteFile(c.JSON, b, 0600)
+			}
 		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "testfs audit:", err)
