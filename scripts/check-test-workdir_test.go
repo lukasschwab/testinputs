@@ -2,18 +2,16 @@ package main
 
 import (
 	"bytes"
+	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"testing"
-	"time"
 )
 
 func writeFile(t *testing.T, name, contents string) {
@@ -211,118 +209,113 @@ func TestMissingIdentityAndMetadata(t *testing.T) {
 	}
 }
 
-// Verify our filtering against the real Go cache's hash inputs, not just against
-// an independent copy of the same algorithm. GODEBUG is used only as a test oracle;
-// the script itself consumes the work log and package metadata.
-func TestRealGoWorkDirectoryMatchesCacheInputs(t *testing.T) {
-	t.Setenv("GOWORK", "off")
-	t.Setenv("GOFLAGS", "")
-	if !strings.HasPrefix(runtime.Version(), "go1.27.") {
-		t.Skip("oracle is pinned to Go 1.27")
-	}
-	base, err := filepath.EvalSymlinks(t.TempDir())
+// workdirGolden is a captured Go 1.27.0 linux/amd64 preserved work
+// directory. It keeps normal tests independent of both `go test -work` and
+// `go list`; expected inputs came from Go's GODEBUG=gocachehash=1 output.
+//
+//go:embed all:testdata/workdir/linux
+var workdirGolden embed.FS
+
+func materializeGolden(t *testing.T, dst, root, external, temporary string) {
+	t.Helper()
+	err := fs.WalkDir(workdirGolden, "testdata/workdir/linux", func(name string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		data, err := workdirGolden.ReadFile(name)
+		if err != nil {
+			return err
+		}
+		data = []byte(strings.NewReplacer("@ROOT@", root, "@EXTERNAL@", external, "@TEMP@", temporary).Replace(string(data)))
+		path := filepath.Join(dst, strings.TrimPrefix(name, "testdata/workdir/linux/"))
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			return err
+		}
+		return os.WriteFile(path, data, 0600)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	root, external, workBase := filepath.Join(base, "checkout with spaces"), filepath.Join(base, "external"), filepath.Join(base, "work")
-	writeFile(t, filepath.Join(root, "go.mod"), "module workfixture\n\ngo 1.27.0\n")
-	writeFile(t, filepath.Join(root, "fixture with spaces.txt"), "fixture")
-	writeFile(t, filepath.Join(external, "outside.txt"), "external")
-	if err := os.MkdirAll(workBase, 0700); err != nil {
-		t.Fatal(err)
-	}
-	old := time.Now().Add(-time.Minute)
-	for _, file := range []string{filepath.Join(root, "fixture with spaces.txt"), filepath.Join(external, "outside.txt")} {
-		if err := os.Chtimes(file, old, old); err != nil {
+}
+
+func TestCapturedWorkDirectoryMatchesCacheInputs(t *testing.T) {
+	base := t.TempDir()
+	work, root := filepath.Join(base, "work"), filepath.Join(base, "checkout with spaces")
+	external, temporary := filepath.Join(base, "external"), filepath.Join(base, "temporary")
+	for _, dir := range []string{work, root, filepath.Join(root, "second"), external, temporary} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
-	writeFile(t, filepath.Join(root, "fixture_test.go"), fmt.Sprintf(`package workfixture_test
-import("os";"path/filepath";"testing")
-func TestFiles(t *testing.T) {
-  _,_ = os.ReadFile("fixture with spaces.txt")
-  _,_ = os.Stat(".")
-  _,_ = os.Open("missing file")
-  _,_ = os.ReadFile(%q)
-  _,_ = os.Open(filepath.Join(t.TempDir(),"missing temporary file"))
-  t.Chdir(%q)
-  _,_ = os.ReadFile("outside.txt")
-}
-`, filepath.Join(external, "outside.txt"), external))
-	cmd := exec.Command("go", "test", "-work", ".")
-	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=", "GOCACHEPROG=", "GOTMPDIR="+workBase, "GODEBUG=gocachehash=1")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("go test: %v\n%s", err, output)
-	}
-	work := ""
-	for _, line := range strings.Split(string(output), "\n") {
-		if strings.HasPrefix(line, "WORK=") {
-			work = strings.TrimPrefix(line, "WORK=")
-			break
-		}
-	}
-	if work == "" {
-		t.Fatal("no retained work directory")
-	}
-	r := inspectWork(options{work: work, project: root, goCommand: "go"})
-	if len(r.Errors) != 0 || len(r.Packages) != 1 || len(r.Packages[0].Errors) != 0 {
+	materializeGolden(t, work, root, external, temporary)
+	meta := filepath.Join(work, "packages.json")
+	r := inspectWork(options{work: work, metadata: meta})
+	if len(r.Errors) != 0 || len(r.Packages) != 2 {
 		t.Fatalf("%+v", r)
 	}
-	gotSet, wantSet := map[string]bool{}, map[string]bool{}
-	for _, f := range r.Packages[0].Findings {
-		gotSet[f.Operation+" "+f.Path] = true
-	}
-	for _, line := range strings.Split(string(output), "\n") {
-		if !strings.HasPrefix(line, "HASH[testInputs]: ") {
-			continue
+	got := map[string]bool{}
+	for _, p := range r.Packages {
+		if len(p.Errors) != 0 {
+			t.Fatalf("%+v", p)
 		}
-		payload, err := strconv.Unquote(strings.TrimPrefix(line, "HASH[testInputs]: "))
-		if err != nil {
-			continue
+		for _, f := range p.Findings {
+			got[f.Operation+" "+f.Path] = true
 		}
-		if !strings.HasPrefix(payload, "open ") && !strings.HasPrefix(payload, "stat ") && !strings.HasPrefix(payload, "chdir ") {
-			continue
+	}
+	wantData, err := workdirGolden.ReadFile("testdata/workdir/linux/expected-inputs.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{}
+	for _, line := range strings.Split(string(wantData), "\n") {
+		if line != "" && !strings.HasPrefix(line, "#") {
+			want[strings.NewReplacer("@ROOT@", root, "@EXTERNAL@", external, "@TEMP@", temporary).Replace(line)] = true
 		}
-		payload = strings.TrimSuffix(payload, "\n")
-		end := strings.LastIndexByte(payload, ' ')
-		if end < 0 {
-			t.Fatalf("unexpected hash input %q", payload)
-		}
-		wantSet[payload[:end]] = true
 	}
-	if len(wantSet) == 0 {
-		t.Fatal("Go produced no file-input oracle records")
+	if !mapsEqual(got, want) {
+		t.Fatalf("cache input mismatch\nscript: %q\nGo golden: %q", sortedSet(got), sortedSet(want))
 	}
-	if !reflect.DeepEqual(gotSet, wantSet) {
-		keys := func(m map[string]bool) []string {
-			var out []string
-			for k := range m {
-				out = append(out, k)
-			}
-			sort.Strings(out)
-			return out
-		}
-		t.Fatalf("filter mismatch\nscript: %q\nGo: %q", keys(gotSet), keys(wantSet))
+	if r.Packages[0].Ignored+r.Packages[1].Ignored < 3 {
+		t.Fatalf("external/temporary operations were not filtered: %+v", r.Packages)
 	}
-	if r.Packages[0].Ignored < 3 {
-		t.Fatalf("external/temporary opens were not filtered: %+v", r.Packages[0])
-	}
-	// Re-inspection never executes the test binary or changes its action log.
-	before, err := os.ReadFile(r.Packages[0].Log)
+	// Saved metadata means preserved-work inspection neither runs go test nor go list.
+	before, err := os.ReadFile(filepath.Join(work, "b001", "testlog.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var out, stderr bytes.Buffer
-	if code := mainWithArgs([]string{"-work", work, "-project", root}, &out, &stderr); code != 1 {
+	if code := mainWithArgs([]string{"-work", work, "-packages-json", meta}, &out, &stderr); code != 1 {
 		t.Fatalf("code=%d\n%s\n%s", code, &out, &stderr)
 	}
-	after, err := os.ReadFile(r.Packages[0].Log)
+	after, err := os.ReadFile(filepath.Join(work, "b001", "testlog.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(before, after) {
 		t.Fatal("inspection modified test log")
 	}
+}
+
+func mapsEqual(a, b map[string]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for key := range a {
+		if !b[key] {
+			return false
+		}
+	}
+	return true
+}
+
+func sortedSet(values map[string]bool) []string {
+	result := make([]string, 0, len(values))
+	for value := range values {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
 }

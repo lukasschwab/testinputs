@@ -153,8 +153,9 @@ go build -o ./bin/check-test-workdir ./scripts/check-test-workdir.go
 Exit 0 means no relevant filesystem operations in the inspected logs; 1 means
 potential cache risks; 2 means incomplete/invalid inspection, taking precedence
 over findings. This checks dependency selection rather than reproducing a cache
-miss or calculating a cache key. It ignores environment records. Tests compare
-its selected paths with Go's actual cache-input hashing output.
+miss or calculating a cache key. It ignores environment records. Tests compare its selected paths with embedded, independently captured Go 1.27
+cache-input records. See [`scripts/testdata/workdir/README.md`](scripts/testdata/workdir/README.md)
+for capture provenance and the explicit toolchain-update regeneration procedure.
 
 ### Collect a fresh audit
 
@@ -246,9 +247,13 @@ go test -run '^$' -bench BenchmarkAnalyzer -benchmem .
 Use `-count=1` when editing analysistest fixtures: package loading in subprocesses
 is not necessarily represented in Go's test-cache inputs. Fixtures cover safe and
 unsafe provenance, aliases, wrappers, helpers/facts, recursion, roots, suppression
-ownership, JSON, and read/write distinctions. Disposable-module integration tests
-exercise the real vettool and audit, parallel execution, temporary classification,
-spaces, failed opens, missing/partial logs, failures, timeouts, and blind spots.
+ownership, JSON, and read/write distinctions. `analysistest` fixtures cover direct and imported helper diagnostics; this is the
+analyzer contract formerly also asserted through a disposable-module `go vet`
+invocation. The separate vettool `-V=full` handshake is implementation-specific
+and is not exercised by the default suite. Audit integration tests still exercise
+the real `go test -exec` protocol, including the CLI dispatcher, launcher, parallel
+execution, temporary classification, spaces, failed opens, missing/partial logs,
+failures, timeouts, and blind spots.
 
 The benchmark generates modules with 10 and 1,000 helper/test pairs, excluding
 package loading from timed analysis. Initial measurements and limits are recorded

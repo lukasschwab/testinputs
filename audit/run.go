@@ -19,6 +19,7 @@ const (
 	ExitAuditFailure  = 2
 	ExitPolicyFinding = 3
 	launcherEnv       = "TESTFS_AUDIT_SESSION"
+	auditHelperEnv    = "TESTFS_AUDIT_TEST_HELPER"
 )
 
 type Package struct {

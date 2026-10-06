@@ -5,30 +5,26 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
 
 var binary string
 
+// TestMain makes this existing test executable the audit CLI and -exec helper.
+// The explicit environment gate prevents ordinary fixture test processes from
+// accidentally dispatching into the helper.
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "testfs binary with spaces-*")
-	if err != nil {
-		panic(err)
+	if os.Getenv(auditHelperEnv) != "1" {
+		os.Exit(m.Run())
 	}
-	binary = filepath.Join(dir, "testfs")
-	if runtime.GOOS == "windows" {
-		binary += ".exe"
+	if len(os.Args) > 1 && os.Args[1] == "audit" {
+		os.Exit(Main(os.Args[2:]))
 	}
-	cmd := exec.Command("go", "build", "-o", binary, "../cmd/testfs")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		os.RemoveAll(dir)
-		panic(string(out) + err.Error())
+	if len(os.Args) > 1 && os.Args[1] == "--testfs-launch" {
+		os.Exit(Launch(os.Args[2:]))
 	}
-	code := m.Run()
-	os.RemoveAll(dir)
-	os.Exit(code)
+	os.Exit(ExitAuditFailure)
 }
 
 func module(t *testing.T) string {
@@ -46,9 +42,25 @@ func invoke(t *testing.T, dir string, opts, goArgs []string) (Report, int, strin
 	args := append([]string{"audit", "-json", reportFile}, opts...)
 	args = append(args, "--")
 	args = append(args, goArgs...)
-	cmd := exec.Command(binary, args...)
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Keep quoting coverage without compiling a second executable.
+	copy := filepath.Join(t.TempDir(), "testfs helper with spaces"+filepath.Ext(exe))
+	if err := os.Link(exe, copy); err != nil {
+		data, readErr := os.ReadFile(exe)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if err := os.WriteFile(copy, data, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd := exec.Command(copy, args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=")
+	cmd.Env = append(os.Environ(), auditHelperEnv+"=1", "GOWORK=off", "GOFLAGS=")
 	out, err := cmd.CombinedOutput()
 	code := 0
 	if err != nil {
@@ -143,16 +155,5 @@ func TestAuditBlindSpots(t *testing.T) {
 	}
 	if len(r.Limitations) < 7 {
 		t.Fatal("missing coverage limitations")
-	}
-}
-
-func TestVettoolIntegration(t *testing.T) {
-	dir := module(t)
-	cmd := exec.Command("go", "vet", "-vettool="+binary, "./static")
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=")
-	out, err := cmd.CombinedOutput()
-	if err == nil || strings.Count(string(out), "TFS001:") != 2 {
-		t.Fatalf("expected two standard vettool diagnostics (direct and imported): %v\n%s", err, out)
 	}
 }

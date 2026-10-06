@@ -71,7 +71,9 @@ func Launch(args []string) int {
 	}
 	childArgs := append([]string{"-test.testlogfile=" + filepath.Join(base, "actions.log")}, args[1:]...)
 	cmd := exec.Command(args[0], childArgs...)
-	cmd.Env = os.Environ()
+	// The audit test harness uses an environment-gated dispatcher. Its child is
+	// the package test binary, not another dispatcher invocation.
+	cmd.Env = append(os.Environ(), auditHelperEnv+"=0")
 	if manifest.TempBase != "" {
 		cmd.Env = append(cmd.Env, "TMPDIR="+manifest.TempBase, "TMP="+manifest.TempBase, "TEMP="+manifest.TempBase)
 	}

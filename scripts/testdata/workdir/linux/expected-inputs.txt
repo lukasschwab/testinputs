@@ -1,0 +1,9 @@
+# Captured from Go 1.27.0 linux/amd64 with GODEBUG=gocachehash=1.
+# Scenario: checkout reads/stats, failed opens, external and temporary files,
+# external chdir, spaces, and multiple package identities.
+open @ROOT@/fixture with spaces.txt
+open @ROOT@/missing file
+open @ROOT@
+stat @ROOT@
+chdir @EXTERNAL@
+chdir @ROOT@
