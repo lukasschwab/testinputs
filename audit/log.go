@@ -183,3 +183,37 @@ func within(root, name string) bool {
 	rel, err := filepath.Rel(root, name)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
+
+// findingsFromRecords converts selected log records into stable, aggregated findings.
+func findingsFromRecords(pkg string, records []Record, selectRecord func(Record) bool) ([]Finding, int) {
+	out, ignored := []Finding{}, 0
+	indices := map[string]int{}
+	for _, r := range records {
+		if !selectRecord(r) {
+			ignored++
+			continue
+		}
+		key := r.Operation + "\x00" + r.Path + "\x00" + r.Environment
+		if r.Implicit {
+			key += "\x00implicit"
+		}
+		if i, ok := indices[key]; ok {
+			out[i].Count++
+			continue
+		}
+		indices[key] = len(out)
+		f := Finding{Package: pkg, Rule: "TFS001", Operation: r.Operation, Evidence: "observed", Confidence: "observed", CacheRelevant: r.CacheRelevant, Count: 1}
+		if r.Environment != "" {
+			f.Environment = r.Environment
+			if r.Implicit {
+				f.Evidence, f.Confidence, f.Reason = "implicit", "implicit", "Go runtime cache input asserted by cmd/go; no test-log environment value is collected"
+			} else {
+				f.Reason = "environment read observed; environment values are unavailable"
+			}
+		} else {
+			f.Reason, f.Path, f.Class = "filesystem operation observed; outcome and read/write mode are unavailable", r.Path, r.Class
+		}
+		out = append(out, f)
+	}
+	return out, ignored
+}

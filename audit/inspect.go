@@ -10,11 +10,9 @@ import (
 	"go/token"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
-	"strings"
 )
 
 type inspectionPackage struct {
@@ -42,28 +40,11 @@ type InspectionReport struct {
 	Limitations   []string           `json:"limitations"`
 }
 
-func inspectMain(c config, args []string) int {
-	if len(args) != 0 {
-		fmt.Fprintln(os.Stderr, "testfs audit: -work does not accept package arguments")
-		return ExitAuditFailure
-	}
-	if c.TempParent != "" || c.KeepLogs || c.FailOnCheckout {
-		fmt.Fprintln(os.Stderr, "testfs audit: -temp-base, -keep-logs, and -fail-on-checkout are unavailable with -work")
-		return ExitAuditFailure
-	}
+func inspectMain(c config) int {
 	r := inspectWork(c)
 	if c.JSON != "" {
-		b, err := json.MarshalIndent(r, "", "  ")
-		if err == nil {
-			b = append(b, '\n')
-			if c.JSON == "-" {
-				_, err = os.Stdout.Write(b)
-			} else {
-				err = os.WriteFile(c.JSON, b, 0600)
-			}
-		}
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "testfs audit:", err)
+		if err := writeReportJSON(c, r); err != nil {
+			fmt.Fprintln(os.Stderr, "testfs:", err)
 			return ExitAuditFailure
 		}
 	} else {
@@ -95,7 +76,7 @@ func inspectWork(c config) InspectionReport {
 		Limitations: []string{
 			"Reports observed package-level cache inputs, not individual test attribution or reproduced cache misses.",
 			"Only preserved logs are inspected; cache hits or skipped packages may leave no logs or actions.",
-			"Metadata is resolved now unless -packages-json is supplied and must describe the original checkout paths.",
+			"Supplied metadata must describe the original checkout paths; metadata is never resolved by this tool.",
 			"Filtering models Go 1.27 computeTestInputsID/search.InDir; it does not compute hashes or check cache eligibility. Logged environment names and cmd/go's implicit GODEBUG input are reported without values.",
 			"Open records include failed and write-mode opens. Initialization, pre-m.Run setup, subprocesses, and direct syscalls may be unlogged. Implicit GODEBUG is asserted only for complete compatible logs.",
 		},
@@ -237,21 +218,8 @@ func testPackage(filename string) (string, error) {
 	}
 	return names[0], nil
 }
-func loadInspectionMetadata(c config, names []string) (map[string]inspectionPackage, error) {
-	var data []byte
-	var err error
-	if c.PackagesJSON != "" {
-		data, err = os.ReadFile(c.PackagesJSON)
-	} else {
-		cmd := exec.Command(c.Go, append(append([]string{"list", "-json"}, c.BuildFlags...), names...)...)
-		cmd.Dir = c.Project
-		var stderr bytes.Buffer
-		cmd.Stderr = &stderr
-		data, err = cmd.Output()
-		if err != nil {
-			return nil, fmt.Errorf("go list metadata: %w: %s (use original -project/build flags or -packages-json)", err, strings.TrimSpace(stderr.String()))
-		}
-	}
+func loadInspectionMetadata(c config, _ []string) (map[string]inspectionPackage, error) {
+	data, err := os.ReadFile(c.PackagesJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -277,6 +245,7 @@ func loadInspectionMetadata(c config, names []string) (map[string]inspectionPack
 	}
 	return out, nil
 }
+
 func printInspection(w io.Writer, r InspectionReport) {
 	flagged, observations, incomplete := 0, 0, len(r.Errors)
 	for _, e := range r.Errors {

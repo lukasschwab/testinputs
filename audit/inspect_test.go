@@ -224,14 +224,8 @@ func TestInspectionCLIAndNonMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code := inspectMain(config{Work: work, PackagesJSON: meta}, nil); code != 1 {
+	if code := inspectMain(config{Work: work, PackagesJSON: meta}); code != 1 {
 		t.Fatalf("successful inspection code=%d", code)
-	}
-	if code := inspectMain(config{Work: work, PackagesJSON: meta}, []string{"./..."}); code != ExitAuditFailure {
-		t.Fatalf("package args code=%d", code)
-	}
-	if code := inspectMain(config{Work: work, PackagesJSON: meta, KeepLogs: true}, nil); code != ExitAuditFailure {
-		t.Fatalf("collection flag code=%d", code)
 	}
 	after, err := os.ReadFile(filepath.Join(work, "b001", "testlog.txt"))
 	if err != nil {
@@ -308,14 +302,14 @@ func TestInspectionCLIJSONAndCleanAndEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	jsonFile := filepath.Join(t.TempDir(), "inspection.json")
-	if code := inspectMain(config{Work: work, PackagesJSON: meta, JSON: jsonFile}, nil); code != 1 {
+	if code := inspectMain(config{Work: work, PackagesJSON: meta, JSON: jsonFile}); code != 1 {
 		t.Fatalf("clean JSON code=%d", code)
 	}
 	if data, err := os.ReadFile(jsonFile); err != nil || !strings.Contains(string(data), `"packages"`) {
 		t.Fatalf("JSON report: %v %s", err, data)
 	}
 	empty := t.TempDir()
-	if code := inspectMain(config{Work: empty, PackagesJSON: meta}, nil); code != ExitAuditFailure {
+	if code := inspectMain(config{Work: empty, PackagesJSON: meta}); code != ExitAuditFailure {
 		t.Fatalf("empty work code=%d", code)
 	}
 }
@@ -355,7 +349,7 @@ func captureStdout(t *testing.T, f func() int) (int, []byte) {
 func TestInspectionCLIJSONStdoutIncludesReportErrors(t *testing.T) {
 	work, meta := materializeInspection(t)
 	code, data := captureStdout(t, func() int {
-		return inspectMain(config{Work: work, PackagesJSON: meta, JSON: "-"}, nil)
+		return inspectMain(config{Work: work, PackagesJSON: meta, JSON: "-"})
 	})
 	if code != 1 {
 		t.Fatalf("finding inspection code=%d", code)
@@ -369,7 +363,7 @@ func TestInspectionCLIJSONStdoutIncludesReportErrors(t *testing.T) {
 	}
 
 	code, data = captureStdout(t, func() int {
-		return inspectMain(config{Work: t.TempDir(), PackagesJSON: meta, JSON: "-"}, nil)
+		return inspectMain(config{Work: t.TempDir(), PackagesJSON: meta, JSON: "-"})
 	})
 	if code != ExitAuditFailure {
 		t.Fatalf("incomplete inspection code=%d", code)

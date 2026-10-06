@@ -4,88 +4,44 @@
 inputs that can make test-result caching sensitive to a checkout. Its primary mode
 is inspection: it reads Go's saved test logs and **does not execute tests**.
 
-Requires Go 1.27. Runtime inspection supports released Go 1.27.x toolchains on
-Linux, macOS, and Windows. It reports observed cache inputs, not cache misses or
-proof that a test suite is hermetic.
+Requires Go 1.27 test-work artifacts. The inspector understands the Go 1.27
+test-log format on Linux, macOS, and Windows. It reports observed cache inputs,
+not cache misses or proof that a test suite is hermetic.
 
-## Inspect preserved work (primary workflow)
+## Inspect preserved work
 
-Build the runtime tool, preserve a work directory while running the tests, then
-inspect that directory. Do **not** add `-count=1`: doing so disables Go's normal
-cache-input logging.
+`testfs` is artifact-only: it never invokes `go`, test binaries, or any other
+process. Supply both artifacts from the same checkout:
 
 ```sh
 go build -o ./bin/testfs ./cmd/testfs
+go list -json ./... > packages.json
 go test -work ./...
 # Go prints WORK=/path/to/work
-./bin/testfs -work /path/to/work -project "$PWD"
-# Stream exactly one indented inspection report to stdout.
-./bin/testfs -work /path/to/work -project "$PWD" -json -
+./bin/testfs -work /path/to/work -packages-json packages.json -json -
 ```
 
-`-work` never runs tests. It reads identities from generated `_testmain.go` files
-and package roots from `go list`. Save package metadata when inspection must work
-offline or later:
+Both `-work` and `-packages-json` are required. Metadata must describe the exact
+checkout paths used by the test run, including symlink spelling. `-json -` writes
+one report to stdout; omitting `-json` prints a readable report there. The command
+does not accept package selectors, build flags, or test arguments, and it never
+falls back to `go list`.
 
-```sh
-go list -json ./... > packages.json
-./bin/testfs -work /path/to/work -packages-json packages.json -json inspection.json
-```
+The inspector reads package identities from generated `_testmain.go` files and
+reports Go 1.27 test-log cache inputs: filesystem `open`, `stat`, and `chdir`
+events, environment names (never values), and the implicit `GODEBUG` input.
+Findings are package-level observations, not cache misses or per-test attribution.
+It does not calculate hashes or judge cache eligibility.
 
-Pass original package-selection build settings via repeatable
-`-build-flag`, for example `-build-flag=-tags=integration`. Metadata, preserved
-logs, checkout paths, and symlink layout must retain the spelling and topology
-used by the test. Status 1 means a cache-relevant input was observed, and 2
-means inspection was incomplete. Because Go always includes ambient `GODEBUG` in
-the cache inputs, every inspection with at least one complete compatible action
-reports that implicit dependency and exits 1; status 0 is therefore possible only
-when no findings are present. `-json -` writes exactly one indented inspection
-JSON document to stdout; report coverage errors remain in that document while
-operational errors are written to stderr.
+Exit 1 means a cache-relevant observation was found. Missing actions/logs,
+malformed logs, invalid identities, and invalid metadata are coverage errors and
+exit 2, taking precedence over findings. Cache hits and skipped packages can leave
+no artifacts and cannot prove cache independence. Initialization before `m.Run`,
+child processes, direct syscalls, operation outcomes, and read/write mode are not
+represented by the logs.
 
-Absent actions (for example cache hits, skipped packages, or disabled logging) do
-not show that a test is cache-independent. The inspector filters Go 1.27 logged
-opens/stats and `chdir` operations according to Go's lexical-then-symlink
-behavior. It reports every logged environment name (including implicit API reads
-from `TempDir`, `Getwd`, and `Setenv`) without collecting a value or hash. Go's
-ambient `GODEBUG` cache input is also reported as distinct **implicit** evidence
-for each complete compatible action, whether or not it appears in that action's
-log. It does not calculate hashes, judge cache eligibility, or attribute an
-operation to a test. Initialization and pre-`m.Run` setup, subprocess/direct
-syscall I/O, outcomes, and read/write mode are not present in these logs.
-
-Inspection fixtures and their regeneration procedure live in
+Inspection fixtures and their external regeneration procedure live in
 [`audit/testdata/inspection`](audit/testdata/inspection/README.md).
-
-## Collect a fresh runtime audit
-
-A collection run is available when no preserved work directory exists. It runs
-selected tests with `-count=1`, so it measures observed access rather than cache
-hits. The historic `testfs audit` spelling remains an alias. During fresh collection,
-stdout remains reserved for child test output, so `-json -` is intentionally
-available only with `-work`.
-
-```sh
-./bin/testfs ./...
-./bin/testfs -json audit.json -- -race -run TestAttachment ./...
-./bin/testfs -temp-base /an/existing/external/directory -- ./...
-./bin/testfs audit -fail-on-checkout -keep-logs -- ./...
-```
-
-Options precede `--`; arguments after it go to `go test`. Collection preserves
-test output and its nonzero status, while collector failures return 2 and
-`-fail-on-checkout` returns 3 after otherwise successful tests. `-temp-base`
-creates a test-owned directory outside selected roots and sets `TMPDIR`, `TMP`,
-and `TEMP`; it is removed after collection. `-keep-logs` retains raw logs and
-invocation metadata.
-
-The internal Go log records `open`, `stat`, `chdir`, and `getenv`. Environment
-findings contain names only—never values or hashes—and include the implicit Go
-runtime `GODEBUG` input. An open is an attempt,
-including failed and write-only opens, so results never claim a confirmed read.
-Missing, malformed, truncated, or interrupted collection is not clean. Active
-fuzzing, benchmarks, compile-only/list-only invocations, and overrides of
-`-exec`, `-test.testlogfile`, or `-count` are rejected.
 
 ## Optional static analyzer
 
