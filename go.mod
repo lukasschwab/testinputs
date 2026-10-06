@@ -1,4 +1,4 @@
-module testfs
+module github.com/lukasschwab/testinputs
 
 go 1.27.0
 

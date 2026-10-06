@@ -7,7 +7,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"testfs/report"
+
+	"github.com/lukasschwab/testinputs/report"
 )
 
 const ExitAuditFailure = 2
@@ -21,10 +22,10 @@ type config struct {
 // Main reads only supplied artifacts. It never invokes Go, test binaries, or other processes.
 func Main(args []string) int {
 	var c config
-	flags := flag.NewFlagSet("testfs", flag.ContinueOnError)
+	flags := flag.NewFlagSet("testinputs", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	flags.Usage = func() {
-		fmt.Fprintln(flags.Output(), "Usage: testfs -work DIR -packages-json packages.json [-json FILE|-]")
+		fmt.Fprintln(flags.Output(), "Usage: testinputs -work DIR -packages-json packages.json [-json FILE|-]")
 		fmt.Fprintln(flags.Output(), "Inspect a preserved go test -work directory without executing commands.")
 		flags.PrintDefaults()
 	}
@@ -38,11 +39,11 @@ func Main(args []string) int {
 		return ExitAuditFailure
 	}
 	if len(flags.Args()) != 0 {
-		fmt.Fprintln(os.Stderr, "testfs: package and execution arguments are unsupported; supply only artifacts")
+		fmt.Fprintln(os.Stderr, "testinputs: package and execution arguments are unsupported; supply only artifacts")
 		return ExitAuditFailure
 	}
 	if c.Work == "" || c.PackagesJSON == "" {
-		fmt.Fprintln(os.Stderr, "testfs: both -work and -packages-json are required")
+		fmt.Fprintln(os.Stderr, "testinputs: both -work and -packages-json are required")
 		return ExitAuditFailure
 	}
 	return inspectMain(c)

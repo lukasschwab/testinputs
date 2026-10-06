@@ -1,6 +1,6 @@
-# testfs
+# testinputs
 
-`testfs` analyzes preserved Go test work directories to identify filesystem and
+`testinputs` analyzes preserved Go test work directories to identify filesystem and
 environment inputs that can affect test-result caching.
 
 These checks are especially relevant to CI: the Go cache's hash representation
@@ -15,7 +15,7 @@ utilities like `t.TempDir`.
 ## Installation
 
 ```bash
-go install github.com/lukasschwab/testfs/cmd/testfs@latest
+go install github.com/lukasschwab/testinputs/cmd/testinputs@latest
 ```
 
 ## Usage
@@ -26,7 +26,7 @@ In your Go module root:
 go list -json ./... > packages.json
 go test -work ./...
 # Go prints WORK=/path/to/work
-testfs -work /path/to/work -packages-json packages.json
+testinputs -work /path/to/work -packages-json packages.json
 ```
 
 ## Findings
@@ -43,7 +43,7 @@ testfs -work /path/to/work -packages-json packages.json
 ## Optional static analyzer
 
 The source analyzer is intentionally contained in [`analyzer`](analyzer/). It is
-not part of the default `testfs` command or runtime inspection dependency graph.
+not part of the default `testinputs` command or runtime inspection dependency graph.
 See its [README](analyzer/README.md) to build the optional vettool, embed
-`testfs/analyzer`, or use the golangci-lint adapter example.
+`github.com/lukasschwab/testinputs/analyzer`, or use the golangci-lint adapter example.
 

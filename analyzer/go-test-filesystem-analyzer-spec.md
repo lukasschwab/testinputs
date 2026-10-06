@@ -1,7 +1,7 @@
 # Go test filesystem dependency analyzer and runtime audit
 
 Status: implementation proposal. Written 2026-09-18.
-Working name: `testfs`. Names below describe proposed interfaces, not existing commands.
+Working name: `testinputs`. Names below describe proposed interfaces, not existing commands.
 
 ## Purpose and decision
 
@@ -40,9 +40,9 @@ The tool must distinguish these cases:
 
 ## Deliverables and scope
 
-Publish an optional `testfs/analyzer` package and contained command-line driver. The analyzer name is `testfs`. Keep the reusable analysis package independent of a specific metalinter version. Runtime collection and preserved-work inspection are documented at the repository root.
+Publish an optional `github.com/lukasschwab/testinputs/analyzer` package and contained command-line driver. The analyzer name is `testinputs`. Keep the reusable analysis package independent of a specific metalinter version. Preserved-work inspection is documented at the repository root.
 
-Provide a `singlechecker` executable usable directly or through `go vet -vettool`. Document integration into a metalinter using its supported analyzer/plugin mechanism. Host linters own `//nolint:testfs` processing; the analyzer must not silently interpret that comment differently. A standalone runner may offer explicit diagnostic filtering, but must document its own syntax.
+Provide a `singlechecker` executable usable directly or through `go vet -vettool`. Document integration into a metalinter using its supported analyzer/plugin mechanism. Host linters own `//nolint:testinputs` processing; the analyzer must not silently interpret that comment differently. A standalone runner may offer explicit diagnostic filtering, but must document its own syntax.
 
 Use stable rule identifiers:
 
@@ -114,60 +114,25 @@ Report at the test-side call when possible, with related locations for the helpe
 Example diagnostic:
 
 ```text
-attachment_test.go:42: TFS001: reading "testdata/workbook.xlsx" at runtime may make cached test results depend on checkout metadata; embed the fixture or use a temporary copy of embedded data (testfs)
+attachment_test.go:42: TFS001: reading "testdata/workbook.xlsx" at runtime may make cached test results depend on checkout metadata; embed the fixture or use a temporary copy of embedded data (testinputs)
 ```
 
 Do not autofix. Embedding may cross a module boundary, change intentional source checks, or require a different fixture owner.
 
-## Runtime audit: a practical go test wrapper
+## Runtime inspection
 
-Yes, Go exposes a usable implementation mechanism. Test binaries have an internal `-test.testlogfile` flag. The test dependency logger writes `open`, `stat`, `chdir`, and `getenv` records. This is an internal interface, not a supported public tracing API. See [testing's flag and lifecycle](https://go.dev/src/testing/testing.go) and the [test dependency logger](https://go.dev/src/testing/internal/testdeps/deps.go).
+The primary command consumes preserved `go test -work` artifacts and saved
+`go list -json` metadata. It does not launch Go or test binaries. See the
+[root README](../README.md) for its interface and findings.
 
-Use a small launcher through the public `go test -exec` option. Go retains ownership of package selection, compilation, working directories, and test output. The launcher starts each test binary with a unique action-log path and collects the result. The `-exec` facility is documented in the [go command](https://pkg.go.dev/cmd/go). Current Go code omits its normal automatic action-log argument when an execution wrapper is present; the launcher must explicitly supply its own flag.
-
-Proposed user interface:
-
-```sh
-testfs audit ./...
-testfs audit -json audit.json -- -race -run TestAttachment ./...
-```
-
-These commands are a design, not a validated prototype.
-
-### Collector contract
-
-1. Resolve the selected Go toolchain and package metadata. Record the Go version, platform, build flags, and package directories.
-2. Start `go test` with the launcher and `-count=1` so cached results cannot hide executions. Explain that this is an audit run, not a cache-hit measurement.
-3. Give each launcher invocation its own log and metadata file. Record its working directory and arguments. Preserve stdout, stderr, signals, timeout behavior, and the test process's status.
-4. Inject the log flag before a possible argument separator. Reject conflicting user-supplied log flags and unsupported existing `-exec` wrappers rather than overriding them silently. Test paths containing spaces on all supported platforms.
-5. Parse records by splitting at the first space. Retain sequence and initial working directory; update path resolution on logged `chdir` events. Validate the header and distinguish missing, partial, and malformed logs.
-6. Aggregate by package, operation, and normalized path. Use package-directory metadata to identify packages, never a guessed binary basename. Keep raw and resolved paths where resolution is ambiguous.
-7. Report checkout/module observations separately from external filesystem observations and temporary access. Keep Go-cache root filtering distinct from realpath-based display classification.
-8. Preserve test failure as the primary outcome. Return a separate documented status for audit failures and policy findings. A missing collector log must never be reported as a clean audit.
-
-Version-gate the internal-log adapter. Test each supported Go release on Linux, macOS, and Windows. For unsupported releases, emit a clear collector limitation; do not fall back to a success report. Avoid relying on Go's build-cache file layout or scraping `GODEBUG` output as the primary data API.
-
-### Embedded and temporary access at runtime
-
-Embedded reads naturally produce no underlying disk-open record for the fixture. Library calls that eventually use instrumented `os` APIs appear without needing a library-specific model.
-
-The log does not identify `t.TempDir()` ownership. Do not infer it solely because a path is somewhere beneath `/tmp`; a checkout may itself be there. By default classify paths outside cache-relevant module roots as external/cache-ignored where that matches the selected Go version, not as proven temporary.
-
-Offer an explicit audit option to provide a dedicated temporary base outside the workspace and set the platform's temporary-directory environment variables for the test process. Paths beneath that base can be classified separately, subject to symlink caveats. This option changes test environment and must be recorded in the report. Never silently reset a project's existing temporary-directory configuration.
-
-### Limits and precise terminology
-
-An `open` record means an attempted open, not proof that bytes were read. It has no result or mode. `os.OpenFile` logs before opening and also logs write-mode opens. See [os.OpenFile implementation](https://go.dev/src/os/file.go). Runtime output must say “filesystem access” or “open observed,” not “read confirmed.”
-
-The internal log also lacks source positions, call stacks, goroutine identity, and test names. Do not assign a file operation to whichever parallel test most recently emitted a JSON event. Report package-level evidence. A user-selected rerun of one test can narrow attribution, but helpers and background goroutines still participate.
-
-Logging starts during `m.Run`; it does not cover package initialization or `TestMain` setup before that call. It misses child-process I/O, direct syscalls, and C-library accesses that bypass the hooks. A crash may leave buffered records unwritten. Current logging also omits empty names and names containing newlines. The audit must publish these coverage limits.
-
-A wrapper cannot replace `os.ReadFile` globally using a Go module replacement. Avoid monkey-patching, `go:linkname`, and custom toolchains. Optional syscall tracing could later cover processes and earlier startup on selected platforms, but it brings OS-specific privileges, noise, and attribution work.
+Runtime evidence is package-level: the log lacks test names, source positions,
+call stacks, outcomes, and read/write mode. An open is an attempt, not a confirmed
+read. Logging excludes initialization before `m.Run`, subprocess I/O, and direct
+syscalls. Missing or malformed artifacts are coverage errors.
 
 ## Evidence and reporting
 
-Both modes produce versioned JSON with package, rule, operation, evidence kind, confidence, reason, path or expression, and source location when known. Runtime results may have no source location. Include scope/coverage limitations and suppression status. Do not expose environment values; this tool only needs filesystem findings.
+Both modes produce versioned JSON with package, rule, operation, evidence kind, confidence, reason, path or expression, and source location when known. Runtime results may have no source location. Include scope/coverage limitations and suppression status. Do not expose environment values; runtime environment findings contain names only.
 
 Separate three statements in reports:
 
