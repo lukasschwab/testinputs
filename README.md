@@ -99,6 +99,13 @@ build inputs or Go's behavior when fixture contents change.
 
 ## Runtime audit
 
+`testfs audit` has two intentional modes: without `-work` it runs an uncached
+collection and reports observations without failing for them; with `-work` it
+only inspects already-preserved Go logs and returns status 1 for cache-relevant
+observations. Both modes return status 2 for incomplete audit coverage. The
+modes share parsing and finding aggregation, but their execution contracts and
+default finding status differ deliberately.
+
 ### Inspect a preserved `go test -work` directory
 
 `testfs audit -work` inspects an existing work directory; it **never executes

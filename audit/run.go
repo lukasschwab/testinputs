@@ -300,17 +300,9 @@ func run(c config, args []string) (r Report) {
 
 func aggregate(invocations []Invocation) []Finding {
 	out := []Finding{}
-	indices := map[string]int{}
 	for _, inv := range invocations {
-		for _, r := range inv.Log.Records {
-			key := inv.Package + "\x00" + r.Operation + "\x00" + r.Path
-			if i, ok := indices[key]; ok {
-				out[i].Count++
-				continue
-			}
-			indices[key] = len(out)
-			out = append(out, Finding{Package: inv.Package, Rule: "TFS001", Operation: r.Operation, Evidence: "observed", Confidence: "observed", Reason: "filesystem operation observed; outcome and read/write mode are unavailable", Path: r.Path, Class: r.Class, CacheRelevant: r.CacheRelevant, Count: 1})
-		}
+		findings, _ := findingsFromRecords(inv.Package, inv.Log.Records, func(Record) bool { return true })
+		out = append(out, findings...)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		a, b := out[i], out[j]
@@ -323,6 +315,27 @@ func aggregate(invocations []Invocation) []Finding {
 		return a.Path < b.Path
 	})
 	return out
+}
+
+// findingsFromRecords is shared by fresh collection and preserved-work
+// inspection. selectRecord lets inspection retain Go cache inputs only.
+func findingsFromRecords(pkg string, records []Record, selectRecord func(Record) bool) ([]Finding, int) {
+	out, ignored := []Finding{}, 0
+	indices := map[string]int{}
+	for _, r := range records {
+		if !selectRecord(r) {
+			ignored++
+			continue
+		}
+		key := r.Operation + "\x00" + r.Path
+		if i, ok := indices[key]; ok {
+			out[i].Count++
+			continue
+		}
+		indices[key] = len(out)
+		out = append(out, Finding{Package: pkg, Rule: "TFS001", Operation: r.Operation, Evidence: "observed", Confidence: "observed", Reason: "filesystem operation observed; outcome and read/write mode are unavailable", Path: r.Path, Class: r.Class, CacheRelevant: r.CacheRelevant, Count: 1})
+	}
+	return out, ignored
 }
 
 func supportedVersion(version, platform string) bool {

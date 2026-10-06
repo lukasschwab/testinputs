@@ -15,7 +15,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"testfs/report"
 )
 
 type inspectionPackage struct {
@@ -48,6 +47,10 @@ func inspectMain(c config, args []string) int {
 		fmt.Fprintln(os.Stderr, "testfs audit: -work does not accept package arguments")
 		return ExitAuditFailure
 	}
+	if c.TempParent != "" || c.KeepLogs || c.FailOnCheckout {
+		fmt.Fprintln(os.Stderr, "testfs audit: -temp-base, -keep-logs, and -fail-on-checkout are unavailable with -work")
+		return ExitAuditFailure
+	}
 	if c.JSON == "-" {
 		fmt.Fprintln(os.Stderr, "testfs audit: -json requires a file; stdout is reserved for the inspection report")
 		return ExitAuditFailure
@@ -65,24 +68,37 @@ func inspectMain(c config, args []string) int {
 	} else {
 		printInspection(os.Stdout, r)
 	}
+	return inspectionExitCode(r)
+}
+
+// inspectionExitCode gives incomplete coverage precedence over observations.
+func inspectionExitCode(r InspectionReport) int {
+	incomplete, findings := len(r.Errors) > 0, false
 	for _, p := range r.Packages {
-		if len(p.Errors) > 0 {
-			return ExitAuditFailure
-		}
-		if len(p.Findings) > 0 {
-			return 1
-		}
+		incomplete = incomplete || len(p.Errors) > 0
+		findings = findings || len(p.Findings) > 0
 	}
-	if len(r.Errors) > 0 {
+	if incomplete {
 		return ExitAuditFailure
+	}
+	if findings {
+		return 1
 	}
 	return 0
 }
 
 func inspectWork(c config) InspectionReport {
-	r := InspectionReport{SchemaVersion: SchemaVersion, FilterModel: "go1.27", Packages: []InspectionAction{}, Errors: []string{}, Limitations: []string{
-		"Reports observed package-level cache inputs, not individual test attribution or reproduced cache misses.", "Only preserved logs are inspected; cache hits or skipped packages may leave no logs or actions.", "Metadata is resolved now unless -packages-json is supplied and must describe the original checkout paths.", "Filtering models Go 1.27 computeTestInputsID/search.InDir; it does not compute hashes, check cache eligibility, or inspect environment inputs.", "Open records include failed and write-mode opens. Initialization, pre-m.Run setup, subprocesses, and direct syscalls may be unlogged.",
-	}}
+	r := InspectionReport{
+		SchemaVersion: SchemaVersion, FilterModel: "go1.27",
+		Packages: []InspectionAction{}, Errors: []string{},
+		Limitations: []string{
+			"Reports observed package-level cache inputs, not individual test attribution or reproduced cache misses.",
+			"Only preserved logs are inspected; cache hits or skipped packages may leave no logs or actions.",
+			"Metadata is resolved now unless -packages-json is supplied and must describe the original checkout paths.",
+			"Filtering models Go 1.27 computeTestInputsID/search.InDir; it does not compute hashes, check cache eligibility, or inspect environment inputs.",
+			"Open records include failed and write-mode opens. Initialization, pre-m.Run setup, subprocesses, and direct syscalls may be unlogged.",
+		},
+	}
 	work, err := filepath.Abs(c.Work)
 	if err != nil {
 		r.Errors = append(r.Errors, err.Error())
@@ -159,20 +175,7 @@ func inspectWork(c config) InspectionReport {
 			p.Errors = append(p.Errors, l.Problem)
 			continue
 		}
-		indices := map[string]int{}
-		for _, rec := range l.Records {
-			if !rec.CacheRelevant {
-				p.Ignored++
-				continue
-			}
-			key := rec.Operation + "\x00" + rec.Path
-			if i, ok := indices[key]; ok {
-				p.Findings[i].Count++
-				continue
-			}
-			indices[key] = len(p.Findings)
-			p.Findings = append(p.Findings, Finding{Package: p.Package, Rule: "TFS001", Operation: rec.Operation, Evidence: "observed", Confidence: "observed", Reason: "filesystem operation observed in preserved Go cache-input log; outcome and read/write mode are unavailable", Path: rec.Path, Class: rec.Class, CacheRelevant: true, Count: 1})
-		}
+		p.Findings, p.Ignored = findingsFromRecords(p.Package, l.Records, func(r Record) bool { return r.CacheRelevant })
 	}
 	sort.Slice(r.Packages, func(i, j int) bool {
 		if r.Packages[i].Package != r.Packages[j].Package {
@@ -287,7 +290,7 @@ func printInspection(w io.Writer, r InspectionReport) {
 			continue
 		}
 		flagged++
-		fmt.Fprintf(w, "\n%s: potential CI test-cache instability [%s]\n", p.Package, p.Action)
+		fmt.Fprintf(w, "\n%s: observed cache dependencies [%s]\n", p.Package, p.Action)
 		for _, f := range p.Findings {
 			fmt.Fprintf(w, "  %s %q (%d occurrence(s))\n    %s\n", f.Operation, f.Path, f.Count, f.Reason)
 			observations += f.Count
@@ -296,5 +299,3 @@ func printInspection(w io.Writer, r InspectionReport) {
 	fmt.Fprintf(w, "\n%d/%d inspected package action(s) flagged; %d cache-relevant operation(s); %d coverage error(s).\n", flagged, len(r.Packages), observations, incomplete)
 	fmt.Fprintln(w, "Scope: preserved logs only; cache-hit packages may be absent. Findings are observations, not proven misses.")
 }
-
-var _ = report.SchemaVersion

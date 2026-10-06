@@ -101,3 +101,35 @@ func sameSet(a, b map[string]bool) bool {
 	}
 	return true
 }
+
+func TestInspectionCoverageErrorsTakePrecedence(t *testing.T) {
+	work, meta := materializeInspection(t)
+	// b001 has captured findings; b002 is intentionally incomplete.
+	if err := os.Remove(filepath.Join(work, "b002", "testlog.txt")); err != nil {
+		t.Fatal(err)
+	}
+	r := inspectWork(config{Work: work, PackagesJSON: meta})
+	if len(r.Packages[0].Findings) == 0 || len(r.Packages[1].Errors) == 0 {
+		t.Fatalf("expected finding and later coverage error: %+v", r)
+	}
+	if got := inspectionExitCode(r); got != ExitAuditFailure {
+		t.Fatalf("exit code=%d, want coverage failure", got)
+	}
+}
+
+func TestInspectionGlobalMetadataErrorTakesPrecedence(t *testing.T) {
+	work, meta := materializeInspection(t)
+	if err := os.WriteFile(meta, []byte("not JSON"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	r := inspectWork(config{Work: work, PackagesJSON: meta})
+	if len(r.Errors) == 0 || len(r.Packages[0].Findings) != 0 {
+		t.Fatalf("expected global metadata error: %+v", r)
+	}
+	// Model the report that can contain earlier observations plus a later
+	// metadata failure; exit policy must still prioritize coverage.
+	r.Packages[0].Findings = []Finding{{Package: "example", Count: 1}}
+	if got := inspectionExitCode(r); got != ExitAuditFailure {
+		t.Fatalf("exit code=%d, want coverage failure", got)
+	}
+}
