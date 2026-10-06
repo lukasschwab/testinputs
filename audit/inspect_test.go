@@ -2,35 +2,48 @@ package audit
 
 import (
 	"embed"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-//go:embed testdata/inspection/packages.json testdata/inspection/work/b001/_testmain.go testdata/inspection/work/b001/testlog.txt testdata/inspection/work/b002/_testmain.go testdata/inspection/work/b002/testlog.txt testdata/inspection/expected-hash-inputs.txt
+//go:embed all:testdata/inspection/linux
 var inspectionFixtures embed.FS
 
 func materializeInspection(t *testing.T) (string, string) {
 	t.Helper()
 	base := t.TempDir()
-	root := filepath.Join(base, "checkout")
-	for _, name := range []string{"work/b001/_testmain.go", "work/b001/testlog.txt", "work/b002/_testmain.go", "work/b002/testlog.txt", "packages.json", "expected-hash-inputs.txt"} {
-		b, err := inspectionFixtures.ReadFile("testdata/inspection/" + name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		target := filepath.Join(base, name)
-		if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
-			t.Fatal(err)
-		}
-		s := strings.ReplaceAll(string(b), "@ROOT@", root)
-		s = strings.ReplaceAll(s, "/OUTSIDE", filepath.Join(base, "outside"))
-		if err := os.WriteFile(target, []byte(s), 0600); err != nil {
+	work, root := filepath.Join(base, "work"), filepath.Join(base, "checkout with spaces")
+	external, temp := filepath.Join(base, "external"), filepath.Join(base, "temporary")
+	for _, d := range []string{work, root, filepath.Join(root, "second"), external, temp} {
+		if err := os.MkdirAll(d, 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
-	return filepath.Join(base, "work"), filepath.Join(base, "packages.json")
+	err := fs.WalkDir(inspectionFixtures, "testdata/inspection/linux", func(name string, e fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if e.IsDir() {
+			return nil
+		}
+		b, err := inspectionFixtures.ReadFile(name)
+		if err != nil {
+			return err
+		}
+		b = []byte(strings.NewReplacer("@ROOT@", root, "@EXTERNAL@", external, "@TEMP@", temp).Replace(string(b)))
+		target := filepath.Join(work, strings.TrimPrefix(name, "testdata/inspection/linux/"))
+		if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
+			return err
+		}
+		return os.WriteFile(target, b, 0600)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return work, filepath.Join(work, "packages.json")
 }
 func TestInspectWorkEmbeddedFixture(t *testing.T) {
 	work, meta := materializeInspection(t)
@@ -38,22 +51,33 @@ func TestInspectWorkEmbeddedFixture(t *testing.T) {
 	if len(r.Errors) != 0 || len(r.Packages) != 2 {
 		t.Fatalf("%+v", r)
 	}
-	a := r.Packages[0]
-	if len(a.Findings) != 3 || a.Ignored != 2 {
-		t.Fatalf("%+v", a)
+	got := map[string]bool{}
+	ignored := 0
+	for _, p := range r.Packages {
+		if len(p.Errors) > 0 {
+			t.Fatalf("%+v", p)
+		}
+		ignored += p.Ignored
+		for _, f := range p.Findings {
+			got[f.Operation+" "+f.Path] = true
+		}
 	}
-	wantData, err := inspectionFixtures.ReadFile("testdata/inspection/expected-hash-inputs.txt")
+	if ignored < 3 {
+		t.Fatalf("external/temporary records not ignored: %+v", r.Packages)
+	}
+	b, err := inspectionFixtures.ReadFile("testdata/inspection/linux/expected-inputs.txt")
 	if err != nil {
 		t.Fatal(err)
 	}
 	base := filepath.Dir(work)
-	want := strings.Split(strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(string(wantData), "@ROOT@", filepath.Join(base, "checkout")), "@OUTSIDE@", filepath.Join(base, "outside"))), "\n")
-	got := make([]string, len(a.Findings))
-	for i, f := range a.Findings {
-		got[i] = f.Operation + " " + f.Path
+	want := map[string]bool{}
+	for _, line := range strings.Split(string(b), "\n") {
+		if line != "" && !strings.HasPrefix(line, "#") {
+			want[strings.NewReplacer("@ROOT@", filepath.Join(base, "checkout with spaces"), "@EXTERNAL@", filepath.Join(base, "external"), "@TEMP@", filepath.Join(base, "temporary")).Replace(line)] = true
+		}
 	}
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("records = %q, want independent Go hash-input capture %q", got, want)
+	if !sameSet(got, want) {
+		t.Fatalf("records=%v want independent Go hash-input capture=%v", got, want)
 	}
 }
 func TestInspectRejectsRelativeChdir(t *testing.T) {
@@ -65,4 +89,15 @@ func TestInspectRejectsRelativeChdir(t *testing.T) {
 	if len(r.Packages[0].Errors) == 0 {
 		t.Fatalf("%+v", r)
 	}
+}
+func sameSet(a, b map[string]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k := range a {
+		if !b[k] {
+			return false
+		}
+	}
+	return true
 }

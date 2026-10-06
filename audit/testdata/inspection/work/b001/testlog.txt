@@ -1,6 +1,0 @@
-# test log
-open fixture.txt
-stat ../go.mod
-open /OUTSIDE/ignored
-chdir /OUTSIDE
-open child

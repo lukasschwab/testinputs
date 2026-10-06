@@ -1,0 +1,10 @@
+# test log
+open fixture with spaces.txt
+stat .
+open missing file
+open @EXTERNAL@/outside.txt
+open @TEMP@/missing temporary file
+open .
+chdir @EXTERNAL@
+open outside.txt
+chdir @ROOT@

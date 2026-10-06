@@ -1,13 +1,13 @@
 # Inspection fixture provenance
 
-The files here are minimal captured Go 1.27 `go test -work` artifacts. `@ROOT@`
-is rebound by `inspect_test.go`; `/OUTSIDE` is rebound to a sibling outside that
-root. Expected records in the test are an independent oracle captured from
-`GODEBUG=gocachehash=1`, not derived from the inspector.
+`linux` is a minimal captured Go 1.27.0 linux/amd64 `go test -work` directory.
+`@ROOT@`, `@EXTERNAL@`, and `@TEMP@` are rebound consistently by
+`inspect_test.go`. `expected-inputs.txt` is an independent capture from
+`GODEBUG=gocachehash=1`, not derived from this inspector. No binaries are kept.
 
-To regenerate after deliberately changing the supported Go implementation,
-create the equivalent disposable module, run Go 1.27 with `go test -work` and
-`GODEBUG=gocachehash=1`, copy only `_testmain.go`, `testlog.txt`, and `go list
--json` metadata (never binaries), then compare selected `HASH[testInputs]`
-records before updating `inspect_test.go`. This is a developer procedure, not a
-routine test dependency.
+To deliberately update Go support, recreate the disposable scenario described
+in the expected-input comments with `go test -work` and `GODEBUG=gocachehash=1`,
+then copy only generated `_testmain.go`, `testlog.txt`, and saved `go list -json`
+metadata. Compare selected hash inputs before updating this fixture. This is a
+developer regeneration procedure; normal tests invoke neither `go test` nor
+`go list`.

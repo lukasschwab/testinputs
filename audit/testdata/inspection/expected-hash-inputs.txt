@@ -1,3 +1,0 @@
-open @ROOT@/pkg/fixture.txt
-stat @ROOT@/go.mod
-chdir @OUTSIDE@
