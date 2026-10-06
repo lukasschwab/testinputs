@@ -133,3 +133,84 @@ func TestInspectionGlobalMetadataErrorTakesPrecedence(t *testing.T) {
 		t.Fatalf("exit code=%d, want coverage failure", got)
 	}
 }
+
+func TestInspectionCLIAndNonMutation(t *testing.T) {
+	work, meta := materializeInspection(t)
+	before, err := os.ReadFile(filepath.Join(work, "b001", "testlog.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code := inspectMain(config{Work: work, PackagesJSON: meta}, []string{"./..."}); code != ExitAuditFailure {
+		t.Fatalf("package args code=%d", code)
+	}
+	if code := inspectMain(config{Work: work, PackagesJSON: meta, KeepLogs: true}, nil); code != ExitAuditFailure {
+		t.Fatalf("collection flag code=%d", code)
+	}
+	after, err := os.ReadFile(filepath.Join(work, "b001", "testlog.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatal("inspection modified preserved log")
+	}
+}
+
+func TestInspectionIdentityAndMetadataErrors(t *testing.T) {
+	work, meta := materializeInspection(t)
+	if err := os.Remove(filepath.Join(work, "b001", "_testmain.go")); err != nil {
+		t.Fatal(err)
+	}
+	r := inspectWork(config{Work: work, PackagesJSON: meta})
+	if len(r.Packages[0].Errors) == 0 {
+		t.Fatalf("missing identity accepted: %+v", r)
+	}
+	for _, data := range []string{"not json", `{"ImportPath":"a","Dir":"relative"}`, `{"ImportPath":"a","Error":{"Err":"unavailable"}}`} {
+		if err := os.WriteFile(meta, []byte(data), 0600); err != nil {
+			t.Fatal(err)
+		}
+		r = inspectWork(config{Work: work, PackagesJSON: meta})
+		if len(r.Errors) == 0 {
+			t.Fatalf("metadata accepted: %s", data)
+		}
+	}
+}
+
+func TestInspectionLogFilteringContracts(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	log := ParseLog([]byte("# test log\nopen temporary\nchdir "+outside+"\nopen child\n"), root, "", "")
+	findings, ignored := findingsFromRecords("p", log.Records, func(r Record) bool { return r.CacheRelevant })
+	if len(findings) != 1 || findings[0].Operation != "chdir" || ignored != 2 {
+		t.Fatalf("%+v ignored=%d", findings, ignored)
+	}
+	if cacheContains(root, root+string(filepath.Separator)+".."+string(filepath.Separator)+"elsewhere") != true {
+		t.Fatal("lexical absolute containment changed")
+	}
+	if cacheContains(root, root+"-sibling") {
+		t.Fatal("sibling prefix included")
+	}
+}
+
+func TestInspectionAggregationAndNoRoot(t *testing.T) {
+	root := t.TempDir()
+	log := ParseLog([]byte("# test log\nopen a b\nopen ./a b\nopen a b\n"), root, root, "")
+	findings, ignored := findingsFromRecords("p", log.Records, func(r Record) bool { return r.CacheRelevant })
+	if ignored != 0 || len(findings) != 1 || findings[0].Count != 3 {
+		t.Fatalf("%+v ignored=%d", findings, ignored)
+	}
+	noRoot := ParseLog([]byte("# test log\nopen temporary\nchdir "+root+"\n"), root, "", "")
+	findings, ignored = findingsFromRecords("p", noRoot.Records, func(r Record) bool { return r.CacheRelevant })
+	if len(findings) != 1 || findings[0].Operation != "chdir" || ignored != 1 {
+		t.Fatalf("%+v ignored=%d", findings, ignored)
+	}
+}
+
+func TestInspectionTemporaryUnderRootIsSelected(t *testing.T) {
+	root := t.TempDir()
+	temp := filepath.Join(root, "tmp", "owned")
+	log := ParseLog([]byte("# test log\nopen "+temp+"\n"), root, root, "")
+	findings, ignored := findingsFromRecords("p", log.Records, func(r Record) bool { return r.CacheRelevant })
+	if len(findings) != 1 || ignored != 0 {
+		t.Fatalf("%+v ignored=%d", findings, ignored)
+	}
+}

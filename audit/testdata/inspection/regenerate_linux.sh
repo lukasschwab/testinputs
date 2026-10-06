@@ -1,10 +1,13 @@
 #!/bin/sh
-# Regenerate linux fixture deliberately; not used by normal tests.
+# Capture a Go 1.27 linux fixture for review. Normal tests never run this.
+# Usage: regenerate_linux.sh OUTPUT_DIRECTORY
 set -eu
-out=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-root="$tmp/checkout with spaces"; external="$tmp/external"; temporary="$tmp/temporary"
-mkdir -p "$root/second" "$external" "$temporary" "$tmp/build"
+[ $# -eq 1 ] || { echo "usage: $0 OUTPUT_DIRECTORY" >&2; exit 2; }
+out=$1
+mkdir -p "$out"
+out=$(CDPATH= cd -- "$out" && pwd)
+base=$(mktemp -d); root="$base/checkout with spaces"; external="$base/external"; temporary="$base/temporary"
+mkdir -p "$root/second" "$external" "$temporary" "$base/build" "$base/cache"
 cat >"$root/go.mod" <<'SRC'
 module workfixture
 go 1.27.0
@@ -20,10 +23,15 @@ import "testing"
 func TestNothing(*testing.T) {}
 SRC
 : >"$root/fixture with spaces.txt"; : >"$external/outside.txt"
-# Review the emitted HASH[testInputs] lines before replacing expected-inputs.
-GODEBUG=gocachehash=1 GOTMPDIR="$tmp/build" go test -work ./... 2>"$tmp/hash" >"$tmp/out" || true
-work=$(sed -n 's/^WORK=//p' "$tmp/out")
-go list -json ./... >"$out/packages.json"
-# Copy only b*/_testmain.go and b*/testlog.txt from "$work", replace absolute
-# paths with @ROOT@/@EXTERNAL@/@TEMP@, and update expected-inputs from $tmp/hash.
-printf '%s\n' "Captured work is $work; inspect $tmp/hash, then curate $out/linux." >&2
+# Hashing ignores files newer than the test start. Make inputs safely old.
+touch -d '2 minutes ago' "$root/fixture with spaces.txt" "$external/outside.txt"
+(
+ cd "$root"
+ GOFLAGS= GOWORK=off GOCACHE="$base/cache" GOTMPDIR="$base/build" GODEBUG=gocachehash=1 \
+   go test -work ./... >"$out/go-test.stdout" 2>"$out/go-test.stderr"
+ GOFLAGS= GOWORK=off go list -json ./... >"$out/packages.json.raw"
+)
+work=$(sed -n 's/^WORK=//p' "$out/go-test.stderr")
+[ -n "$work" ] || { echo "no WORK directory in $out/go-test.stderr" >&2; exit 1; }
+printf '%s\n' "$work" >"$out/WORK"
+printf '%s\n' "Capture retained in $out; curate _testmain.go, testlog.txt, packages metadata, and HASH[testInputs] into the fixture. Source workspace is $base." >&2
