@@ -5,7 +5,7 @@ modules exercise helper summaries, temporary joins, unknown paths, and facts.
 Package loading is excluded from the timed analyzer loop.
 
 ```sh
-/usr/bin/time -l go test -run '^$' -bench BenchmarkAnalyzer -benchtime=1x -benchmem .
+/usr/bin/time -l go test -run '^$' -bench BenchmarkAnalyzer -benchtime=1x -benchmem ./analyzer
 ```
 
 | Module size | Analysis time | Allocated bytes | Allocations | Unresolved call boundaries |

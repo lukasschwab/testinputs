@@ -70,8 +70,8 @@ type config struct {
 // collector failures use 2, and opt-in policy findings use 3.
 func Main(args []string) int {
 	var c config
-	flags := flag.NewFlagSet("testfs audit", flag.ContinueOnError)
-	flags.StringVar(&c.JSON, "json", "", "write the audit report to this JSON file")
+	flags := flag.NewFlagSet("testfs", flag.ContinueOnError)
+	flags.StringVar(&c.JSON, "json", "", "write the audit report to this JSON file; - writes stdout for -work inspection")
 	flags.StringVar(&c.TempParent, "temp-base", "", "create a dedicated temporary base beneath this external directory")
 	flags.StringVar(&c.Go, "go", "go", "Go command to use")
 	flags.StringVar(&c.Work, "work", "", "inspect this directory preserved by go test -work (does not execute tests)")
@@ -90,7 +90,7 @@ func Main(args []string) int {
 		return inspectMain(c, flags.Args())
 	}
 	if c.JSON == "-" {
-		fmt.Fprintln(os.Stderr, "testfs audit: -json requires a file; stdout is reserved for go test")
+		fmt.Fprintln(os.Stderr, "testfs audit: -json=- is supported only with -work; stdout is reserved for go test collection")
 		return ExitAuditFailure
 	}
 	if c.PackagesJSON != "" || len(c.BuildFlags) != 0 || c.Project != "." {
