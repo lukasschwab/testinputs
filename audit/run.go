@@ -60,8 +60,10 @@ type Report struct {
 }
 
 type config struct {
-	JSON, TempParent, Go     string
-	KeepLogs, FailOnCheckout bool
+	JSON, TempParent, Go        string
+	Work, Project, PackagesJSON string
+	BuildFlags                  repeatedValues
+	KeepLogs, FailOnCheckout    bool
 }
 
 // Main implements testfs audit. Test failures retain the go command's status;
@@ -72,6 +74,10 @@ func Main(args []string) int {
 	flags.StringVar(&c.JSON, "json", "", "write the audit report to this JSON file")
 	flags.StringVar(&c.TempParent, "temp-base", "", "create a dedicated temporary base beneath this external directory")
 	flags.StringVar(&c.Go, "go", "go", "Go command to use")
+	flags.StringVar(&c.Work, "work", "", "inspect this directory preserved by go test -work (does not execute tests)")
+	flags.StringVar(&c.Project, "project", ".", "original project directory for inspection metadata")
+	flags.StringVar(&c.PackagesJSON, "packages-json", "", "saved go list -json metadata for -work inspection")
+	flags.Var(&c.BuildFlags, "build-flag", "go list build flag for -work inspection; repeatable")
 	flags.BoolVar(&c.KeepLogs, "keep-logs", false, "retain raw collector logs and invocation metadata")
 	flags.BoolVar(&c.FailOnCheckout, "fail-on-checkout", false, "exit 3 on observed cache-relevant checkout access")
 	if err := flags.Parse(args); err != nil {
@@ -80,8 +86,15 @@ func Main(args []string) int {
 		}
 		return ExitAuditFailure
 	}
+	if c.Work != "" {
+		return inspectMain(c, flags.Args())
+	}
 	if c.JSON == "-" {
 		fmt.Fprintln(os.Stderr, "testfs audit: -json requires a file; stdout is reserved for go test")
+		return ExitAuditFailure
+	}
+	if c.PackagesJSON != "" || len(c.BuildFlags) != 0 || c.Project != "." {
+		fmt.Fprintln(os.Stderr, "testfs audit: -project, -packages-json, and -build-flag require -work")
 		return ExitAuditFailure
 	}
 	r := run(c, flags.Args())
