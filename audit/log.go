@@ -1,4 +1,4 @@
-// Package audit collects package-level filesystem observations from go test.
+// Package audit collects package-level runtime dependency observations from go test.
 // Its backend uses an explicitly version-gated internal Go test log format.
 package audit
 

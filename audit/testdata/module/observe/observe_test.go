@@ -32,7 +32,7 @@ func TestEnvironment(t *testing.T) {
 	// These APIs emit their own getenv records. Names are deliberately stable
 	// fixtures, while values must never enter testfs output.
 	_ = os.Getenv("TESTFS_DIRECT_ENVIRONMENT_FIXTURE")
-	_ = os.Getenv("TESTFS_DIRECT_ENVIRONMENT_WITH_SPACES")
+	_ = os.Getenv("TESTFS DIRECT ENVIRONMENT WITH SPACES")
 	_ = t.TempDir()
 	_, _ = os.Getwd()
 	t.Setenv("TESTFS_SETENVIRONMENT_FIXTURE", "not-reported")

@@ -1,5 +1,6 @@
-# Independently selected from the captured Go 1.27 test log.
-# GODEBUG has both cmd/go implicit and logged evidence.
+# Independently selected from Go 1.27 linux/amd64 GODEBUG=gocachehash=1
+# HASH[testInputs] output and the corresponding captured test log. GODEBUG has
+# both cmd/go implicit and logged evidence. Names only; values and hashes omitted.
 implicit GODEBUG
 observed FIXTURE_ENVIRONMENT
 observed environment with spaces

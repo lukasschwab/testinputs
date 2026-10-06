@@ -66,7 +66,7 @@ type config struct {
 	KeepLogs, FailOnCheckout    bool
 }
 
-// Main implements testfs audit. Test failures retain the go command's status;
+// Main implements testfs audit, collecting package-level runtime dependency observations. Test failures retain the go command's status;
 // collector failures use 2, and opt-in policy findings use 3.
 func Main(args []string) int {
 	var c config
@@ -122,7 +122,7 @@ func Main(args []string) int {
 	}
 	for _, f := range r.Findings {
 		if f.Environment != "" {
-			fmt.Fprintf(os.Stderr, "%s: %s observed environment %s (%d occurrence(s))\n", f.Package, f.Operation, f.Environment, f.Count)
+			fmt.Fprintf(os.Stderr, "%s: %s %s environment %s (%d occurrence(s))\n", f.Package, f.Operation, f.Evidence, f.Environment, f.Count)
 		} else {
 			fmt.Fprintf(os.Stderr, "%s: %s observed %s (%s, %d occurrence(s))\n", f.Package, f.Operation, f.Path, f.Class, f.Count)
 		}
@@ -329,7 +329,13 @@ func aggregate(invocations []Invocation) []Finding {
 		if a.Operation != b.Operation {
 			return a.Operation < b.Operation
 		}
-		return a.Path < b.Path
+		if a.Path != b.Path {
+			return a.Path < b.Path
+		}
+		if a.Environment != b.Environment {
+			return a.Environment < b.Environment
+		}
+		return a.Evidence < b.Evidence
 	})
 	return out
 }
@@ -357,7 +363,7 @@ func findingsFromRecords(pkg string, records []Record, selectRecord func(Record)
 		if r.Environment != "" {
 			f.Environment = r.Environment
 			if r.Implicit {
-				f.Evidence, f.Reason = "implicit", "Go runtime cache input asserted by cmd/go; no test-log environment value is collected"
+				f.Evidence, f.Confidence, f.Reason = "implicit", "implicit", "Go runtime cache input asserted by cmd/go; no test-log environment value is collected"
 			} else {
 				f.Reason = "environment read observed; environment values are unavailable"
 			}

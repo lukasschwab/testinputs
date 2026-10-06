@@ -130,7 +130,7 @@ func TestQuoteExec(t *testing.T) {
 func TestEnvironmentFindingsPreserveNamesAndDistinguishImplicitGODEBUG(t *testing.T) {
 	log := ParseLog([]byte("# test log\ngetenv GODEBUG\ngetenv name with spaces\n"), t.TempDir(), "", "")
 	findings, _ := findingsFromRecords("p", log.Records, func(Record) bool { return true })
-	if len(findings) != 3 || findings[0].Environment != "GODEBUG" || findings[0].Evidence != "implicit" || findings[1].Environment != "GODEBUG" || findings[1].Evidence != "observed" || findings[2].Environment != "name with spaces" {
+	if len(findings) != 3 || findings[0].Environment != "GODEBUG" || findings[0].Evidence != "implicit" || findings[0].Confidence != "implicit" || findings[1].Environment != "GODEBUG" || findings[1].Evidence != "observed" || findings[2].Environment != "name with spaces" {
 		t.Fatalf("environment findings = %+v", findings)
 	}
 	for _, f := range findings {
@@ -146,11 +146,11 @@ func TestEnvironmentFindingsPreserveNamesAndDistinguishImplicitGODEBUG(t *testin
 
 func TestAggregateMergesRepeatedPackageInvocations(t *testing.T) {
 	invocations := []Invocation{
-		{Package: "example.test/p", Log: Log{Records: []Record{{Operation: "open", Path: "/fixture", Class: "checkout/module", CacheRelevant: true}}}},
-		{Package: "example.test/p", Log: Log{Records: []Record{{Operation: "open", Path: "/fixture", Class: "checkout/module", CacheRelevant: true}}}},
+		{Package: "example.test/p", Log: Log{Records: []Record{{Operation: "open", Path: "/fixture", Class: "checkout/module", CacheRelevant: true}, {Operation: "getenv", Environment: "FIXTURE", CacheRelevant: true}}}},
+		{Package: "example.test/p", Log: Log{Records: []Record{{Operation: "open", Path: "/fixture", Class: "checkout/module", CacheRelevant: true}, {Operation: "getenv", Environment: "FIXTURE", CacheRelevant: true}}}},
 	}
 	findings := aggregate(invocations)
-	if len(findings) != 1 || findings[0].Count != 2 {
-		t.Fatalf("aggregate = %+v, want one finding with count 2", findings)
+	if len(findings) != 2 || findings[0].Environment != "FIXTURE" || findings[0].Count != 2 || findings[1].Path != "/fixture" || findings[1].Count != 2 {
+		t.Fatalf("aggregate = %+v, want repeated filesystem and environment findings", findings)
 	}
 }
