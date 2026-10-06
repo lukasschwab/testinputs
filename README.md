@@ -35,10 +35,13 @@ go list -json ./... > packages.json
 Pass original package-selection build settings via repeatable
 `-build-flag`, for example `-build-flag=-tags=integration`. Metadata, preserved
 logs, checkout paths, and symlink layout must retain the spelling and topology
-used by the test. Status 0 is clean, 1 means a cache-relevant input was observed,
-and 2 means inspection was incomplete. `-json -` writes exactly one indented
-inspection JSON document to stdout; report coverage errors remain in that document
-while operational errors are written to stderr.
+used by the test. Status 1 means a cache-relevant input was observed, and 2
+means inspection was incomplete. Because Go always includes ambient `GODEBUG` in
+the cache inputs, every inspection with at least one complete compatible action
+reports that implicit dependency and exits 1; status 0 is therefore possible only
+when no findings are present. `-json -` writes exactly one indented inspection
+JSON document to stdout; report coverage errors remain in that document while
+operational errors are written to stderr.
 
 Absent actions (for example cache hits, skipped packages, or disabled logging) do
 not show that a test is cache-independent. The inspector filters Go 1.27 logged
