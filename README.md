@@ -1,8 +1,8 @@
 # testfs
 
-`testfs` analyzes preserved Go test work directories to identify runtime filesystem
-inputs that can make test-result caching sensitive to a checkout. Its primary mode
-is inspection: it reads Go's saved test logs and **does not execute tests**.
+`testfs` analyzes preserved Go test work directories to identify filesystem and
+environment inputs that can affect test-result caching. It reads supplied
+artifacts and **does not execute commands**.
 
 Requires Go 1.27 test-work artifacts. The inspector understands the Go 1.27
 test-log format on Linux, macOS, and Windows. It reports observed cache inputs,
@@ -21,6 +21,9 @@ go test -work ./...
 ./bin/testfs -work /path/to/work -packages-json packages.json -json -
 ```
 
+Collect logs without `-count=1`, which disables Go's automatic cache-input logging.
+Use the same package selection and build settings for metadata collection and testing.
+
 Both `-work` and `-packages-json` are required. Metadata must describe the exact
 checkout paths used by the test run, including symlink spelling. `-json -` writes
 one report to stdout; omitting `-json` prints a readable report there. The command
@@ -33,7 +36,9 @@ events, environment names (never values), and the implicit `GODEBUG` input.
 Findings are package-level observations, not cache misses or per-test attribution.
 It does not calculate hashes or judge cache eligibility.
 
-Exit 1 means a cache-relevant observation was found. Missing actions/logs,
+Exit 1 means a cache-relevant observation was found. Every complete compatible
+action includes the implicit `GODEBUG` input, even if no environment read was
+logged, so a complete inspection normally exits 1. Exit 0 means no findings. Missing actions/logs,
 malformed logs, invalid identities, and invalid metadata are coverage errors and
 exit 2, taking precedence over findings. Cache hits and skipped packages can leave
 no artifacts and cannot prove cache independence. Initialization before `m.Run`,
