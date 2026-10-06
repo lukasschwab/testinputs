@@ -1,7 +1,10 @@
 package audit
 
 import (
+	"bytes"
 	"embed"
+	"encoding/json"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -11,6 +14,57 @@ import (
 
 //go:embed all:testdata/inspection/linux
 var inspectionFixtures embed.FS
+
+// Translate captured path suffixes without changing relative operation names.
+func inspectionPathReplacer(root, external, temp string) *strings.Replacer {
+	sep := string(filepath.Separator)
+	return strings.NewReplacer(
+		"@ROOT@/", root+sep, "@ROOT@", root,
+		"@EXTERNAL@/", external+sep, "@EXTERNAL@", external,
+		"@TEMP@/", temp+sep, "@TEMP@", temp,
+	)
+}
+
+func rebindInspectionMetadata(data []byte, root string) ([]byte, error) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	var output bytes.Buffer
+	encoder := json.NewEncoder(&output)
+	for {
+		var pkg inspectionPackage
+		if err := decoder.Decode(&pkg); err == io.EOF {
+			return output.Bytes(), nil
+		} else if err != nil {
+			return nil, err
+		}
+		pkg.Dir = inspectionPathReplacer(root, "", "").Replace(pkg.Dir)
+		pkg.Root = inspectionPathReplacer(root, "", "").Replace(pkg.Root)
+		if err := encoder.Encode(pkg); err != nil {
+			return nil, err
+		}
+	}
+}
+
+func TestInspectionMetadataRebindingEscapesPaths(t *testing.T) {
+	data, err := inspectionFixtures.ReadFile("testdata/inspection/linux/packages.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := `C:\Users\runner\checkout "quoted"`
+	data, err = rebindInspectionMetadata(data, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	for _, want := range []string{root, root + string(filepath.Separator) + "second"} {
+		var pkg inspectionPackage
+		if err := decoder.Decode(&pkg); err != nil {
+			t.Fatal(err)
+		}
+		if pkg.Dir != want || pkg.Root != root {
+			t.Fatalf("metadata paths = %q, %q; want %q, %q", pkg.Dir, pkg.Root, want, root)
+		}
+	}
+}
 
 func materializeInspection(t *testing.T) (string, string) {
 	t.Helper()
@@ -33,7 +87,14 @@ func materializeInspection(t *testing.T) (string, string) {
 		if err != nil {
 			return err
 		}
-		b = []byte(strings.NewReplacer("@ROOT@", root, "@EXTERNAL@", external, "@TEMP@", temp).Replace(string(b)))
+		if e.Name() == "packages.json" {
+			b, err = rebindInspectionMetadata(b, root)
+			if err != nil {
+				return err
+			}
+		} else {
+			b = []byte(inspectionPathReplacer(root, external, temp).Replace(string(b)))
+		}
 		target := filepath.Join(work, strings.TrimPrefix(name, "testdata/inspection/linux/"))
 		if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
 			return err
@@ -73,7 +134,7 @@ func TestInspectWorkEmbeddedFixture(t *testing.T) {
 	want := map[string]bool{}
 	for _, line := range strings.Split(string(b), "\n") {
 		if line != "" && !strings.HasPrefix(line, "#") {
-			want[strings.NewReplacer("@ROOT@", filepath.Join(base, "checkout with spaces"), "@EXTERNAL@", filepath.Join(base, "external"), "@TEMP@", filepath.Join(base, "temporary")).Replace(line)] = true
+			want[inspectionPathReplacer(filepath.Join(base, "checkout with spaces"), filepath.Join(base, "external"), filepath.Join(base, "temporary")).Replace(line)] = true
 		}
 	}
 	if !sameSet(got, want) {
