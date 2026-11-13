@@ -5,9 +5,9 @@ environment inputs that can affect test-result caching.
 
 These checks are especially relevant to CI: the Go cache's hash representation
 of files read by tests includes the file's modification timestamp, which often
-(as in GitHub Actions) reflects when the repository was clined rather than when
-the file was last modified. This kind of read results in test packages running
-every time in CI, even though the cache should be fresh.
+(as in GitHub Actions) reflects when the repository was cloned rather than when
+the file was last modified. In these cases, test packages rerun even when the
+`GOCACHE` contains a reusable test result.
 
 These issues are commonly resolved with `//go:embed` directives and `testing`
 utilities like `t.TempDir`.
